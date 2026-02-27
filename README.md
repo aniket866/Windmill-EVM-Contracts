@@ -185,4 +185,23 @@ If you encounter bugs, need help, or have feature requests:
 
 We appreciate your feedback and contributions!
 
+---
+
+## Contract Automation Template
+
+This repository includes baseline workflows for Solidity contract projects:
+
+- CI (`.github/workflows/ci.yml`): format, build, test, coverage
+- Security scan (`.github/workflows/security-slither.yml`): static analysis
+- Gas snapshot (`.github/workflows/gas-snapshot.yml`): baseline and regression checks
+- Nightly fuzz (`.github/workflows/nightly-fuzz.yml`): deeper fuzz/invariant execution
+- Release artifacts (`.github/workflows/release.yml`): tag-based artifact publishing
+
+For deploy and verification flows, copy `.env.example` to `.env` and set values for:
+
+- `PRIVATE_KEY`
+- `MAINNET_RPC_URL`
+- `SEPOLIA_RPC_URL`
+- `ETHERSCAN_API_KEY`
+
 © 2025 The Stable Order.

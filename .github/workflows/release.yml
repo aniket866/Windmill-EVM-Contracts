@@ -1,0 +1,54 @@
+name: Release Artifacts
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build and Publish
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          submodules: recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+
+      - name: Install dependencies
+        run: forge install --no-commit
+
+      # Release should only happen if project builds and tests cleanly.
+      - name: Build contracts
+        run: forge build --sizes
+
+      - name: Run tests
+        run: forge test -vvv
+
+      - name: Package artifacts
+        run: tar -czf evm-contract-artifacts-${{ github.ref_name }}.tar.gz out
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: evm-contract-artifacts-${{ github.ref_name }}
+          path: evm-contract-artifacts-${{ github.ref_name }}.tar.gz
+
+      - name: Publish GitHub release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: evm-contract-artifacts-${{ github.ref_name }}.tar.gz

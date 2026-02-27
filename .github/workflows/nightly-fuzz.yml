@@ -1,0 +1,37 @@
+name: Nightly Fuzz
+
+on:
+  # Run deep fuzzing outside normal PR latency budgets.
+  schedule:
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly-fuzz-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fuzz:
+    name: Deep Fuzz and Invariants
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          submodules: recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+
+      - name: Install dependencies
+        run: forge install --no-commit
+
+      - name: Run deep fuzz tests
+        run: forge test --fuzz-runs 10000 --invariant-runs 1000 -vvv

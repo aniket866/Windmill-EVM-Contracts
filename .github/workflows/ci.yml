@@ -2,29 +2,54 @@ name: Foundry CI
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   pull_request:
-    branches: [ main ]
+    branches: [main]
+  workflow_dispatch:
+
+# Principle of least privilege.
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  FOUNDRY_PROFILE: ci
 
 jobs:
-  build:
-    name: Build and Test
+  checks:
+    name: Format, Build, Test, Coverage
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          submodules: recursive
 
       - name: Install Foundry
         uses: foundry-rs/foundry-toolchain@v1
         with:
-          version: nightly
+          version: stable
 
+      - name: Show Forge version
+        run: forge --version
+
+      # Keep dependency install explicit for repos that don't commit /lib.
       - name: Install dependencies
-        run: forge install
+        run: forge install --no-commit
+
+      - name: Check formatting
+        run: forge fmt --check
 
       - name: Build contracts
-        run: forge build
+        run: forge build --sizes
 
       - name: Run tests
         run: forge test -vvv
+
+      - name: Run coverage
+        run: forge coverage --report summary

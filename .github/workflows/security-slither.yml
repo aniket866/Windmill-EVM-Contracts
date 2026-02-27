@@ -1,0 +1,54 @@
+name: Security - Slither
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "script/**"
+      - "foundry.toml"
+      - ".github/workflows/security-slither.yml"
+  push:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "script/**"
+      - "foundry.toml"
+      - ".github/workflows/security-slither.yml"
+  # Weekly scheduled scan catches issues even when no PR triggers it.
+  schedule:
+    - cron: "0 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: slither-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  slither:
+    name: Static Analysis
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          submodules: recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+
+      - name: Install dependencies
+        run: forge install --no-commit
+
+      # Uses Trail of Bits' maintained action.
+      - name: Run Slither
+        uses: crytic/slither-action@v0.4.1
+        with:
+          target: "."
+          slither-args: --filter-paths "lib|test|script|broadcast|cache|out"

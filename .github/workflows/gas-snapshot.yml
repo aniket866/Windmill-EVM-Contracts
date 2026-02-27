@@ -1,0 +1,63 @@
+name: Gas Snapshot
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "test/**"
+      - "script/**"
+      - "foundry.toml"
+      - ".github/workflows/gas-snapshot.yml"
+  push:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "test/**"
+      - "script/**"
+      - "foundry.toml"
+      - ".github/workflows/gas-snapshot.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gas-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gas:
+    name: Gas Baseline
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          submodules: recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+
+      - name: Install dependencies
+        run: forge install --no-commit
+
+      - name: Check or generate gas snapshot
+        run: |
+          if [ -f .gas-snapshot ]; then
+            forge snapshot --check
+          else
+            # Template bootstrap: generate a first baseline if one is not committed yet.
+            forge snapshot
+          fi
+
+      - name: Upload gas snapshot artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gas-snapshot
+          path: .gas-snapshot
+          if-no-files-found: ignore
