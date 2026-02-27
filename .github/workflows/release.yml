@@ -5,10 +5,9 @@ on:
     tags:
       - "v*.*.*"
   workflow_dispatch:
-     workflow_dispatch:
-     inputs:
+    inputs:
       version:
-        description: 'Version tag (e.g., v1.0.0) - leave empty for branch-based artifacts'
+        description: "Version tag (e.g., v1.0.0) - leave empty for branch-based artifacts"
         required: false
         type: string
 permissions:
@@ -44,16 +43,28 @@ jobs:
       - name: Run tests
         run: forge test -vvv
 
+      - name: Determine version
+        id: version
+        run: |
+          if [ -n "${{ inputs.version }}" ]; then
+            echo "tag=${{ inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "tag=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+          fi
+
       - name: Package artifacts
-        run: tar -czf evm-contract-artifacts-${{ github.ref_name }}.tar.gz out
+        run: tar -czf evm-contract-artifacts-${{ steps.version.outputs.tag }}.tar.gz out
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: evm-contract-artifacts-${{ github.ref_name }}
-          path: evm-contract-artifacts-${{ github.ref_name }}.tar.gz
+          name: evm-contract-artifacts-${{ steps.version.outputs.tag }}
+          path: evm-contract-artifacts-${{ steps.version.outputs.tag }}.tar.gz
 
       - name: Publish GitHub release assets
+        if: github.ref_type == 'tag' || inputs.version != ''
         uses: softprops/action-gh-release@v2
         with:
-          files: evm-contract-artifacts-${{ github.ref_name }}.tar.gz
+          files: evm-contract-artifacts-${{ steps.version.outputs.tag }}.tar.gz
+          tag_name: ${{ inputs.version || github.ref_name }}
+          draft: ${{ github.ref_type != 'tag' }}
