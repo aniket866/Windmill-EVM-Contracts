@@ -33,10 +33,17 @@ line_length = 100
 tab_width = 4
 bracket_spacing = true
 
-# These are placeholders for template consumers.
+# Public RPC endpoints for common networks.
+# For production or heavy usage, replace these with your own provider URLs.
 [rpc_endpoints]
-mainnet = "${MAINNET_RPC_URL}"
-sepolia = "${SEPOLIA_RPC_URL}"
+ethereum = "https://rpc.ankr.com/eth"
+ethereum_classic = "https://etc.rivet.link"
+bsc = "https://bsc-dataseed.bnbchain.org"
+base = "https://mainnet.base.org"
+polygon = "https://rpc.ankr.com/polygon"
+avalanche = "https://api.avax.network/ext/bc/C/rpc"
+sepolia = "https://rpc.sepolia.org"
+mordor = "https://rpc.mordor.etccooperative.org"
 
 # Explorer API keys are only needed for contract verification commands.
 [etherscan]
