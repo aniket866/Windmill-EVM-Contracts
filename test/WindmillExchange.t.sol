@@ -237,6 +237,12 @@ contract WindmillExchangeTest is Test {
         );
     }
 
+    function test_createOrder_revert_invalidPriceBounds() public {
+        vm.prank(alice);
+        vm.expectRevert(InvalidPriceBounds.selector);
+        exchange.createOrder(address(tokenA), address(tokenB), 100 ether, RAY, 0, 2 * RAY, RAY, 0, true);
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     // cancelOrder
     // ─────────────────────────────────────────────────────────────────────────
