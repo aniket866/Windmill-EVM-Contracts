@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.23;
 
-interface IPriceOracle {
-    function getPrice() external view returns (uint256);
-}
+import { IERC20 } from "../interfaces/IERC20.sol";
 import { Order } from "../types/OrderTypes.sol";
 import { OrderStorage } from "../storage/OrderStorage.sol";
 import { PairStorage } from "../storage/PairStorage.sol";
@@ -26,11 +24,19 @@ error SelfMatch();
 error NoCross();
 error PairMismatch();
 error ZeroSettlementPrice();
+error UnsupportedTokenBehavior();
+error PageLimitTooLarge();
+
+interface IPriceOracle {
+    function getPrice() external view returns (uint256);
+}
 
 contract WindmillExchange is OrderStorage, PairStorage, IWindmillExchange {
     uint256 private _reentrancyStatus = 1;
     address public owner;
     bool public paused;
+    event Paused(address indexed by);
+    event Unpaused(address indexed by);
 
     modifier nonReentrant() {
         require(_reentrancyStatus == 1, "WindmillExchange: reentrant call");
@@ -54,10 +60,12 @@ contract WindmillExchange is OrderStorage, PairStorage, IWindmillExchange {
 
     function pause() external onlyOwner {
         paused = true;
+        emit Paused(msg.sender);
     }
 
     function unpause() external onlyOwner {
         paused = false;
+        emit Unpaused(msg.sender);
     }
 
     event OrderCreated(
@@ -80,6 +88,7 @@ contract WindmillExchange is OrderStorage, PairStorage, IWindmillExchange {
     event OrderPartiallyFilled(uint256 indexed orderId, uint256 remainingIn);
 
     uint256 private constant MAX_LIFETIME = 315_360_000;
+    uint256 private constant MAX_PAGE_SIZE = 500;
     uint256 private constant SLOPE_ABS_LIMIT = type(uint128).max / MAX_LIFETIME;
 
     function createOrder(
@@ -129,7 +138,11 @@ contract WindmillExchange is OrderStorage, PairStorage, IWindmillExchange {
         _addOrderToPair(tokenIn, tokenOut, orderId);
 
         // Interactions
+        uint256 balBefore = IERC20(tokenIn).balanceOf(address(this));
         TokenTransfer.safeTransferFrom(tokenIn, msg.sender, address(this), amountIn);
+        if (IERC20(tokenIn).balanceOf(address(this)) - balBefore != amountIn) {
+            revert UnsupportedTokenBehavior();
+        }
 
         emit OrderCreated(orderId, msg.sender, tokenIn, tokenOut, amountIn, isBuy);
     }
@@ -227,7 +240,10 @@ contract WindmillExchange is OrderStorage, PairStorage, IWindmillExchange {
         override
         returns (uint256[] memory)
     {
-        uint256[] storage all = _getOrdersByPairStorage(tokenA, tokenB);
+        if (limit > MAX_PAGE_SIZE) {
+            limit = MAX_PAGE_SIZE;
+        }
+        uint256[] memory all = _getOrdersByPair(tokenA, tokenB);
         uint256 total = all.length;
 
         if (cursor >= total) {
