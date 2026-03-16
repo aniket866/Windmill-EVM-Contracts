@@ -201,32 +201,91 @@ contract WindmillExchangeTest is Test {
     // ── matchOrders ───────────────────────────────────────────────────────────
 
     function test_matchOrders_fullFill() public {
-        uint256 buyId = _buy(alice, 100 ether, RAY, 0, 0);
-        uint256 sellId = _sell(bob, 100 ether, RAY, 0, 0);
+        uint256 amount = 100 ether;
+        uint256 price = RAY; // 1:1
+
+        uint256 aliceTokenABefore = tokenA.balanceOf(alice);
+        uint256 bobTokenBBefore = tokenB.balanceOf(bob);
+
+        uint256 buyId = _buy(alice, amount, price, 0, 0);
+        uint256 sellId = _sell(bob, amount, price, 0, 0);
+
+        address keeper = address(this);
+        uint256 keeperTokenABefore = tokenA.balanceOf(keeper);
 
         exchange.matchOrders(buyId, sellId, block.timestamp + 1);
 
-        assertFalse(exchange.getOrder(buyId).active);
-        assertFalse(exchange.getOrder(sellId).active);
-        assertGt(tokenB.balanceOf(alice), 0);
-        assertGt(tokenA.balanceOf(bob), 0);
+        // settlementPx = midpoint(RAY, RAY) = RAY -> filledAsset = 100e18, paymentOwed = 100e18
+        uint256 expectedFee = amount / 1000; // 0.1 ether
+        uint256 expectedPayment = amount - expectedFee; // 99.9 ether
+
+        // Order state
+        Order memory buyOrder = exchange.getOrder(buyId);
+        Order memory sellOrder = exchange.getOrder(sellId);
+        assertFalse(buyOrder.active, "buy must be inactive");
+        assertFalse(sellOrder.active, "sell must be inactive");
+        assertEq(buyOrder.remainingIn, amount, "buy.remainingIn unchanged on full fill");
+        assertEq(sellOrder.remainingIn, amount, "sell.remainingIn unchanged on full fill");
+
+        // Alice received exactly filledAsset tokenB; lost exactly paymentOwed tokenA
+        assertEq(tokenB.balanceOf(alice), amount, "alice tokenB");
+        assertEq(tokenA.balanceOf(alice), aliceTokenABefore - amount, "alice tokenA (escrowed)");
+
+        // Bob received exactly paymentOwed - fee tokenA; lost filledAsset tokenB
+        assertEq(tokenA.balanceOf(bob), expectedPayment, "bob tokenA");
+        assertEq(tokenB.balanceOf(bob), bobTokenBBefore - amount, "bob tokenB");
+
+        // Keeper received exactly fee
+        assertEq(tokenA.balanceOf(keeper), keeperTokenABefore + expectedFee, "keeper fee");
+
+        // Pair index cleared
+        assertEq(
+            exchange.getOrdersByPair(address(tokenA), address(tokenB), 0, type(uint256).max).length,
+            0
+        );
     }
 
     function test_matchOrders_partialFill() public {
-        uint256 buyId = _buy(alice, 50 ether, RAY, 0, 0);
-        uint256 sellId = _sell(bob, 100 ether, RAY, 0, 0);
+        uint256 buyAmt = 50 ether;
+        uint256 sellAmt = 100 ether;
+        uint256 price = RAY;
+
+        uint256 buyId = _buy(alice, buyAmt, price, 0, 0);
+        uint256 sellId = _sell(bob, sellAmt, price, 0, 0);
 
         exchange.matchOrders(buyId, sellId, block.timestamp + 1);
 
-        assertFalse(exchange.getOrder(buyId).active);
-        assertTrue(exchange.getOrder(sellId).active);
-        assertLt(exchange.getOrder(sellId).remainingIn, 100 ether);
+        // paymentOwed = 50e18, filledAsset = 50e18, keeperFee = 0.05e18
+        uint256 expectedFee = buyAmt / 1000;
+        uint256 expectedSellRemaining = sellAmt - buyAmt; // 50 ether
+
+        Order memory buyOrder = exchange.getOrder(buyId);
+        Order memory sellOrder = exchange.getOrder(sellId);
+
+        assertFalse(buyOrder.active, "buy fully filled -> inactive");
+        assertTrue(sellOrder.active, "sell partially filled -> still active");
+
+        assertEq(sellOrder.remainingIn, expectedSellRemaining, "sell.remainingIn exact");
+        assertEq(sellOrder.createdAt, block.timestamp, "sell.createdAt re-anchored");
+
+        assertEq(tokenB.balanceOf(alice), buyAmt, "alice tokenB exact");
+        assertEq(tokenA.balanceOf(bob), buyAmt - expectedFee, "bob tokenA exact");
+        assertEq(tokenA.balanceOf(address(this)), expectedFee, "keeper fee exact");
     }
 
     function test_matchOrders_revert_expired() public {
         vm.warp(1000);
         uint256 buyId = _buy(alice, 100 ether, RAY, 0, 1500);
         uint256 sellId = _sell(bob, 100 ether, RAY, 0, 0);
+        vm.warp(1501);
+        vm.expectRevert(OrderExpired.selector);
+        exchange.matchOrders(buyId, sellId, block.timestamp + 1);
+    }
+
+    function test_matchOrders_revert_sellExpired() public {
+        vm.warp(1000);
+        uint256 buyId = _buy(alice, 100 ether, RAY, 0, 0);
+        uint256 sellId = _sell(bob, 100 ether, RAY, 0, 1500);
         vm.warp(1501);
         vm.expectRevert(OrderExpired.selector);
         exchange.matchOrders(buyId, sellId, block.timestamp + 1);
@@ -274,5 +333,25 @@ contract WindmillExchangeTest is Test {
         tokenA.mint(alice, amount);
         uint256 id = _buy(alice, amount, RAY, 0, 0);
         assertEq(exchange.getOrder(id).remainingIn, amount);
+    }
+
+    // ── pruneExpiredOrders ────────────────────────────────────────────────────
+
+    function test_pruneExpiredOrders() public {
+        vm.warp(1000);
+        uint256 id1 = _buy(alice, 100 ether, RAY, 0, 1500); // expires at 1500
+        uint256 id2 = _buy(alice, 100 ether, RAY, 0, 2000); // expires at 2000
+
+        vm.warp(1600); // past id1 expiry, before id2
+
+        exchange.pruneExpiredOrders(address(tokenA), address(tokenB), 10);
+
+        assertFalse(exchange.getOrder(id1).active, "expired order pruned");
+        assertTrue(exchange.getOrder(id2).active, "non-expired order untouched");
+
+        uint256[] memory remaining =
+            exchange.getOrdersByPair(address(tokenA), address(tokenB), 0, 10);
+        assertEq(remaining.length, 1, "one order left in pair index");
+        assertEq(remaining[0], id2, "correct order remains");
     }
 }

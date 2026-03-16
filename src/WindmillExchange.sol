@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.23;
 
-// ── Errors ────────────────────────────────────────────────────────────────────
+// ── Errors
 
 error ZeroAddress();
 error SameToken();
@@ -20,7 +20,7 @@ error ZeroSettlementPrice();
 error OrderNotFound();
 error TransferFailed();
 
-// ── Types ─────────────────────────────────────────────────────────────────────
+// ── Types
 
 struct Order {
     uint256 id;
@@ -39,7 +39,7 @@ struct Order {
     uint256 expiry;
 }
 
-// ── Math ──────────────────────────────────────────────────────────────────────
+// ── Math
 
 uint256 constant RAY = 1e27;
 
@@ -96,7 +96,7 @@ function absInt(int256 x) pure returns (uint256) {
     return x >= 0 ? uint256(x) : uint256(-x);
 }
 
-// ── Price Curve ───────────────────────────────────────────────────────────────
+// ── Price Curve
 
 function computePrice(
     uint256 startPrice,
@@ -136,26 +136,39 @@ function orderPrice(Order memory o, uint256 ts) pure returns (uint256) {
     return computePrice(o.startPrice, o.slope, o.createdAt, o.minPrice, o.maxPrice, ts);
 }
 
-// ── Token Transfer ────────────────────────────────────────────────────────────
+// ── Token Transfer
 
+function _balanceOf(address token, address account) view returns (uint256 bal) {
+    (bool ok, bytes memory data) =
+        token.staticcall(abi.encodeWithSignature("balanceOf(address)", account));
+    require(ok && data.length >= 32, "balanceOf failed");
+    bal = abi.decode(data, (uint256));
+}
+
+/// @dev Rejects fee-on-transfer tokens: requires recipient balance increases by exactly `amount`.
 function safeTransfer(address token, address to, uint256 amount) {
     if (amount == 0) return;
     if (token.code.length == 0) revert TransferFailed();
+    uint256 pre = _balanceOf(token, to);
     (bool ok, bytes memory data) =
         token.call(abi.encodeWithSignature("transfer(address,uint256)", to, amount));
     if (!ok || (data.length != 0 && !abi.decode(data, (bool)))) revert TransferFailed();
+    if (_balanceOf(token, to) - pre != amount) revert TransferFailed();
 }
 
+/// @dev Rejects fee-on-transfer tokens: requires `to` balance increases by exactly `amount`.
 function safeTransferFrom(address token, address from, address to, uint256 amount) {
     if (amount == 0) return;
     if (token.code.length == 0) revert TransferFailed();
+    uint256 pre = _balanceOf(token, to);
     (bool ok, bytes memory data) = token.call(
         abi.encodeWithSignature("transferFrom(address,address,uint256)", from, to, amount)
     );
     if (!ok || (data.length != 0 && !abi.decode(data, (bool)))) revert TransferFailed();
+    if (_balanceOf(token, to) - pre != amount) revert TransferFailed();
 }
 
-// ── Exchange ──────────────────────────────────────────────────────────────────
+// ── Exchange
 
 contract WindmillExchange {
     uint256 private _reentrancyStatus = 1;
@@ -194,8 +207,9 @@ contract WindmillExchange {
     );
     event OrderFilled(uint256 indexed orderId);
     event OrderPartiallyFilled(uint256 indexed orderId, uint256 remainingIn);
+    event OrderPruned(uint256 indexed orderId);
 
-    // ── External ──────────────────────────────────────────────────────────────
+    // ── External
 
     function createOrder(
         address tokenIn,
@@ -293,6 +307,7 @@ contract WindmillExchange {
             _pairRemove(buy.tokenIn, buy.tokenOut, buyOrderId);
         } else {
             _orders[buyOrderId].remainingIn = newBuyRemaining;
+            _orders[buyOrderId].createdAt = block.timestamp;
         }
 
         if (sellFilled) {
@@ -300,6 +315,7 @@ contract WindmillExchange {
             _pairRemove(sell.tokenIn, sell.tokenOut, sellOrderId);
         } else {
             _orders[sellOrderId].remainingIn = newSellRemaining;
+            _orders[sellOrderId].createdAt = block.timestamp;
         }
 
         uint256 keeperFee = paymentOwed / 1000;
@@ -342,7 +358,38 @@ contract WindmillExchange {
         return _nextOrderId - 1;
     }
 
-    // ── Internal ──────────────────────────────────────────────────────────────
+    /// @notice Permissionless cleanup: deactivates expired orders from a pair's index.
+    /// @param limit Max orders to scan per call to bound gas.
+    function pruneExpiredOrders(address tokenA, address tokenB, uint256 limit) external {
+        bytes32 key = _pairKey(tokenA, tokenB);
+        uint256[] storage list = _pairOrders[key];
+        uint256 pruned = 0;
+        uint256 i = 0;
+        while (i < list.length && pruned < limit) {
+            uint256 id = list[i];
+            Order storage o = _orders[id];
+            if (o.expiry != 0 && block.timestamp > o.expiry && o.active) {
+                o.active = false;
+                // swap-and-pop
+                uint256 last = list.length;
+                uint256 idx = _pairIndex[key][id];
+                if (idx != last) {
+                    uint256 lastId = list[last - 1];
+                    list[idx - 1] = lastId;
+                    _pairIndex[key][lastId] = idx;
+                }
+                list.pop();
+                delete _pairIndex[key][id];
+                emit OrderPruned(id);
+                pruned++;
+                // i stays — we just moved a new element into position i
+            } else {
+                i++;
+            }
+        }
+    }
+
+    // ── Internal
 
     function _order(uint256 id) private view returns (Order storage) {
         if (_orders[id].maker == address(0)) revert OrderNotFound();
