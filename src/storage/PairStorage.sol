@@ -4,12 +4,13 @@ pragma solidity ^0.8.23;
 import { pairKeyOf } from "../types/OrderTypes.sol";
 
 abstract contract PairStorage {
+    mapping(bytes32 => uint256[]) private _pairOrders;
     mapping(bytes32 => mapping(uint256 => uint256)) private _pairIndex;
-    mapping(uint256 => uint256) private _pairIndex;
 
     function _addOrderToPair(address tokenA, address tokenB, uint256 orderId) internal {
         bytes32 key = pairKeyOf(tokenA, tokenB);
         require(_pairIndex[key][orderId] == 0, "PairStorage: duplicate order");
+
         _pairOrders[key].push(orderId);
         _pairIndex[key][orderId] = _pairOrders[key].length;
     }

@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.23;
 
+interface IPriceOracle {
+    function getPrice() external view returns (uint256);
+}
 import { Order } from "../types/OrderTypes.sol";
 import { OrderStorage } from "../storage/OrderStorage.sol";
 import { PairStorage } from "../storage/PairStorage.sol";
@@ -10,6 +13,7 @@ import { MathUtils } from "../libraries/MathUtils.sol";
 import { IWindmillExchange } from "../interfaces/IWindmillExchange.sol";
 
 error ZeroAddress();
+error SameToken();
 error ZeroAmount();
 error ZeroStartPrice();
 error InvalidExpiry();
@@ -24,8 +28,9 @@ error PairMismatch();
 error ZeroSettlementPrice();
 
 contract WindmillExchange is OrderStorage, PairStorage, IWindmillExchange {
-    // ─── Inline Reentrancy Guard ─────────────────────────────────────────────
     uint256 private _reentrancyStatus = 1;
+    address public owner;
+    bool public paused;
 
     modifier nonReentrant() {
         require(_reentrancyStatus == 1, "WindmillExchange: reentrant call");
@@ -33,8 +38,28 @@ contract WindmillExchange is OrderStorage, PairStorage, IWindmillExchange {
         _;
         _reentrancyStatus = 1;
     }
+    modifier onlyOwner() {
+        require(msg.sender == owner, "Not owner");
+        _;
+    }
 
-    // ─── Events ──────────────────────────────────────────────────────────────
+    modifier whenNotPaused() {
+        require(!paused, "Exchange paused");
+        _;
+    }
+
+    constructor() {
+        owner = msg.sender;
+    }
+
+    function pause() external onlyOwner {
+        paused = true;
+    }
+
+    function unpause() external onlyOwner {
+        paused = false;
+    }
+
     event OrderCreated(
         uint256 indexed orderId,
         address indexed maker,
@@ -54,27 +79,29 @@ contract WindmillExchange is OrderStorage, PairStorage, IWindmillExchange {
     event OrderFilled(uint256 indexed orderId);
     event OrderPartiallyFilled(uint256 indexed orderId, uint256 remainingIn);
 
-    // ─── Constants ───────────────────────────────────────────────────────────
     uint256 private constant MAX_LIFETIME = 315_360_000;
     uint256 private constant SLOPE_ABS_LIMIT = type(uint128).max / MAX_LIFETIME;
-
-    // ─── External Functions ───────────────────────────────────────────────────
 
     function createOrder(
         address tokenIn,
         address tokenOut,
         uint256 amountIn,
         uint256 startPrice,
+        address priceFeed,
         int256 slope,
         uint256 minPrice,
         uint256 maxPrice,
         uint256 expiry,
         bool isBuy
-    ) external override nonReentrant returns (uint256 orderId) {
+    ) external override nonReentrant whenNotPaused returns (uint256 orderId) {
         // Checks
         if (tokenIn == address(0) || tokenOut == address(0)) revert ZeroAddress();
-        if (tokenIn == tokenOut) revert ZeroAddress();
+        if (tokenIn == tokenOut) revert SameToken();
         if (amountIn == 0) revert ZeroAmount();
+        if (priceFeed != address(0)) {
+            startPrice = IPriceOracle(priceFeed).getPrice();
+        }
+
         if (startPrice == 0) revert ZeroStartPrice();
         if (expiry != 0 && expiry <= block.timestamp) revert InvalidExpiry();
         if (maxPrice != 0 && maxPrice < minPrice) revert InvalidPriceBounds();
@@ -107,7 +134,7 @@ contract WindmillExchange is OrderStorage, PairStorage, IWindmillExchange {
         emit OrderCreated(orderId, msg.sender, tokenIn, tokenOut, amountIn, isBuy);
     }
 
-    function cancelOrder(uint256 orderId) external override nonReentrant {
+    function cancelOrder(uint256 orderId) external override nonReentrant whenNotPaused {
         Order storage order = _getOrder(orderId);
 
         if (order.maker != msg.sender) revert NotMaker();
@@ -127,7 +154,13 @@ contract WindmillExchange is OrderStorage, PairStorage, IWindmillExchange {
         emit OrderCancelled(orderId, msg.sender, refund);
     }
 
-    function matchOrders(uint256 buyOrderId, uint256 sellOrderId) external override nonReentrant {
+    function matchOrders(uint256 buyOrderId, uint256 sellOrderId, uint256 deadline)
+        external
+        override
+        nonReentrant
+        whenNotPaused
+    {
+        require(block.timestamp <= deadline, "Keeper deadline expired");
         Order memory buy = _getOrderMem(buyOrderId);
         Order memory sell = _getOrderMem(sellOrderId);
 
@@ -160,8 +193,11 @@ contract WindmillExchange is OrderStorage, PairStorage, IWindmillExchange {
         }
 
         // Interactions
+        uint256 keeperFee = paymentOwed / 1000; // 0.1%
+
         TokenTransfer.safeTransfer(sell.tokenIn, buy.maker, filledAsset);
-        TokenTransfer.safeTransfer(buy.tokenIn, sell.maker, paymentOwed);
+        TokenTransfer.safeTransfer(buy.tokenIn, sell.maker, paymentOwed - keeperFee);
+        TokenTransfer.safeTransfer(buy.tokenIn, msg.sender, keeperFee);
 
         emit OrderMatched(buyOrderId, sellOrderId, msg.sender, settlementPx, filledAsset);
 
@@ -185,20 +221,29 @@ contract WindmillExchange is OrderStorage, PairStorage, IWindmillExchange {
         return _getOrderMem(orderId);
     }
 
-    function getOrdersByPair(address tokenA, address tokenB)
+    function getOrdersByPair(address tokenA, address tokenB, uint256 cursor, uint256 limit)
         external
         view
         override
         returns (uint256[] memory)
     {
-        return _getOrdersByPair(tokenA, tokenB);
+        uint256[] memory all = _getOrdersByPair(tokenA, tokenB);
+
+        uint256 remaining = all.length - cursor;
+        uint256 size = remaining < limit ? remaining : limit;
+
+        uint256[] memory result = new uint256[](size);
+
+        for (uint256 i; i < size; i++) {
+            result[i] = all[cursor + i];
+        }
+
+        return result;
     }
 
     function totalOrders() external view override returns (uint256) {
         return _totalOrders();
     }
-
-    // ─── Internal Helpers ────────────────────────────────────────────────────
 
     function _validateMatch(Order memory buy, Order memory sell, uint256 ts) private pure {
         if (!buy.active) revert OrderInactive();

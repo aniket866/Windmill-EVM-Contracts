@@ -9,6 +9,7 @@ interface IWindmillExchange {
         address tokenOut,
         uint256 amountIn,
         uint256 startPrice,
+        address priceFeed,
         int256 slope,
         uint256 minPrice,
         uint256 maxPrice,
@@ -18,13 +19,13 @@ interface IWindmillExchange {
 
     function cancelOrder(uint256 orderId) external;
 
-    function matchOrders(uint256 buyOrderId, uint256 sellOrderId) external;
+    function matchOrders(uint256 buyOrderId, uint256 sellOrderId, uint256 deadline) external;
 
     function currentPrice(uint256 orderId, uint256 timestamp) external view returns (uint256 price);
 
     function getOrder(uint256 orderId) external view returns (Order memory);
 
-    function getOrdersByPair(address tokenA, address tokenB)
+    function getOrdersByPair(address tokenA, address tokenB, uint256 cursor, uint256 limit)
         external
         view
         returns (uint256[] memory);

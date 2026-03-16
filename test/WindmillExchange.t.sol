@@ -6,6 +6,7 @@ import { WindmillExchange } from "../src/core/WindmillExchange.sol";
 import { Order } from "../src/types/OrderTypes.sol";
 import {
     ZeroAddress,
+    SameToken,
     ZeroAmount,
     ZeroStartPrice,
     InvalidExpiry,
@@ -98,9 +99,7 @@ contract WindmillExchangeTest is Test {
         tokenB.approve(address(exchange), type(uint256).max);
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
     // Helpers
-    // ─────────────────────────────────────────────────────────────────────────
 
     /// @dev Alice buys tokenB with tokenA.  tokenIn=tokenA, tokenOut=tokenB.
     function _createBuyOrder(
@@ -112,7 +111,16 @@ contract WindmillExchangeTest is Test {
     ) internal returns (uint256) {
         vm.prank(maker);
         return exchange.createOrder(
-            address(tokenA), address(tokenB), amountIn, startPrice, slope, 0, 0, expiry, true
+            address(tokenA),
+            address(tokenB),
+            amountIn,
+            startPrice,
+            address(0),
+            slope,
+            0,
+            0,
+            expiry,
+            true
         );
     }
 
@@ -126,13 +134,20 @@ contract WindmillExchangeTest is Test {
     ) internal returns (uint256) {
         vm.prank(maker);
         return exchange.createOrder(
-            address(tokenB), address(tokenA), amountIn, startPrice, slope, 0, 0, expiry, false
+            address(tokenB),
+            address(tokenA),
+            amountIn,
+            startPrice,
+            address(0),
+            slope,
+            0,
+            0,
+            expiry,
+            false
         );
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
     // createOrder — success
-    // ─────────────────────────────────────────────────────────────────────────
 
     function test_createBuyOrder_success() public {
         uint256 amount = 1000 ether;
@@ -185,67 +200,87 @@ contract WindmillExchangeTest is Test {
     function test_ordersByPair_registered() public {
         _createBuyOrder(alice, 100 ether, RAY, 0, 0);
         _createSellOrder(bob, 100 ether, RAY, 0, 0);
-        assertEq(exchange.getOrdersByPair(address(tokenA), address(tokenB)).length, 2);
+        assertEq(
+            exchange.getOrdersByPair(address(tokenA), address(tokenB), 0, type(uint256).max).length,
+            2
+        );
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
     // createOrder — reverts
-    // ─────────────────────────────────────────────────────────────────────────
 
     function test_createOrder_revert_zeroTokenIn() public {
         vm.prank(alice);
         vm.expectRevert(ZeroAddress.selector);
-        exchange.createOrder(address(0), address(tokenB), 100 ether, RAY, 0, 0, 0, 0, true);
+        exchange.createOrder(
+            address(0), address(tokenB), 100 ether, RAY, address(0), 0, 0, 0, 0, true
+        );
     }
 
     function test_createOrder_revert_zeroTokenOut() public {
         vm.prank(alice);
         vm.expectRevert(ZeroAddress.selector);
-        exchange.createOrder(address(tokenA), address(0), 100 ether, RAY, 0, 0, 0, 0, true);
+        exchange.createOrder(
+            address(tokenA), address(0), 100 ether, RAY, address(0), 0, 0, 0, 0, true
+        );
     }
 
     function test_createOrder_revert_sameToken() public {
         vm.prank(alice);
-        vm.expectRevert(ZeroAddress.selector);
-        exchange.createOrder(address(tokenA), address(tokenA), 100 ether, RAY, 0, 0, 0, 0, true);
+        vm.expectRevert(SameToken.selector);
+        exchange.createOrder(
+            address(tokenA), address(tokenA), 100 ether, RAY, address(0), 0, 0, 0, 0, true
+        );
     }
 
     function test_createOrder_revert_zeroAmount() public {
         vm.prank(alice);
         vm.expectRevert(ZeroAmount.selector);
-        exchange.createOrder(address(tokenA), address(tokenB), 0, RAY, 0, 0, 0, 0, true);
+        exchange.createOrder(address(tokenA), address(tokenB), 0, RAY, address(0), 0, 0, 0, 0, true);
     }
 
     function test_createOrder_revert_zeroStartPrice() public {
         vm.prank(alice);
         vm.expectRevert(ZeroStartPrice.selector);
-        exchange.createOrder(address(tokenA), address(tokenB), 100 ether, 0, 0, 0, 0, 0, true);
+        exchange.createOrder(
+            address(tokenA), address(tokenB), 100 ether, 0, address(0), 0, 0, 0, 0, true
+        );
     }
 
     function test_createOrder_revert_expiryInPast() public {
         vm.warp(1000);
         vm.prank(alice);
         vm.expectRevert(InvalidExpiry.selector);
-        exchange.createOrder(address(tokenA), address(tokenB), 100 ether, RAY, 0, 0, 0, 999, true);
+        exchange.createOrder(
+            address(tokenA), address(tokenB), 100 ether, RAY, address(0), 0, 0, 0, 999, true
+        );
     }
 
     function test_createOrder_revert_slopeOverflow() public {
         vm.prank(alice);
         vm.expectRevert(SlopeOverflow.selector);
         exchange.createOrder(
-            address(tokenA), address(tokenB), 100 ether, RAY, type(int128).max, 0, 0, 0, true
+            address(tokenA),
+            address(tokenB),
+            100 ether,
+            RAY,
+            address(0),
+            type(int128).max,
+            0,
+            0,
+            0,
+            true
         );
     }
 
     function test_createOrder_revert_invalidPriceBounds() public {
         vm.prank(alice);
         vm.expectRevert(InvalidPriceBounds.selector);
-        exchange.createOrder(address(tokenA), address(tokenB), 100 ether, RAY, 0, 2 * RAY, RAY, 0, true);
+        exchange.createOrder(
+            address(tokenA), address(tokenB), 100 ether, RAY, address(0), 0, 2 * RAY, RAY, 0, true
+        );
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
     // cancelOrder
-    // ─────────────────────────────────────────────────────────────────────────
 
     function test_cancelOrder_success() public {
         uint256 amount = 200 ether;
@@ -260,7 +295,10 @@ contract WindmillExchangeTest is Test {
 
         assertFalse(exchange.getOrder(id).active);
         assertEq(tokenA.balanceOf(alice), balBefore + amount);
-        assertEq(exchange.getOrdersByPair(address(tokenA), address(tokenB)).length, 0);
+        assertEq(
+            exchange.getOrdersByPair(address(tokenA), address(tokenB), 0, type(uint256).max).length,
+            0
+        );
     }
 
     function test_cancelOrder_revert_notMaker() public {
@@ -279,9 +317,7 @@ contract WindmillExchangeTest is Test {
         exchange.cancelOrder(id);
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
     // matchOrders — success (full fill)
-    // ─────────────────────────────────────────────────────────────────────────
 
     /// @dev Equal amounts at same price → both orders fully filled.
     ///      buyPrice == sellPrice → hasCrossed == true, settlementPrice == startPrice.
@@ -298,7 +334,7 @@ contract WindmillExchangeTest is Test {
         uint256 aliceTokenBBefore = tokenB.balanceOf(alice);
         uint256 bobTokenABefore = tokenA.balanceOf(bob);
 
-        exchange.matchOrders(buyId, sellId);
+        exchange.matchOrders(buyId, sellId, block.timestamp + 1);
 
         // Both orders should be deactivated (fully filled)
         assertFalse(exchange.getOrder(buyId).active, "buy should be inactive");
@@ -310,12 +346,13 @@ contract WindmillExchangeTest is Test {
         assertGt(tokenA.balanceOf(bob), bobTokenABefore, "bob should receive tokenA");
 
         // Pair should have no active orders
-        assertEq(exchange.getOrdersByPair(address(tokenA), address(tokenB)).length, 0);
+        assertEq(
+            exchange.getOrdersByPair(address(tokenA), address(tokenB), 0, type(uint256).max).length,
+            0
+        );
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
     // matchOrders — partial fills
-    // ─────────────────────────────────────────────────────────────────────────
 
     /// @dev Buy order is smaller than sell order → buy fully fills, sell is partial.
     function test_matchOrders_partialFill_buySmaller() public {
@@ -326,7 +363,7 @@ contract WindmillExchangeTest is Test {
         uint256 buyId = _createBuyOrder(alice, buyAmt, price, 0, 0);
         uint256 sellId = _createSellOrder(bob, sellAmt, price, 0, 0);
 
-        exchange.matchOrders(buyId, sellId);
+        exchange.matchOrders(buyId, sellId, block.timestamp + 1);
 
         Order memory buyOrder = exchange.getOrder(buyId);
         Order memory sellOrder = exchange.getOrder(sellId);
@@ -356,7 +393,7 @@ contract WindmillExchangeTest is Test {
         uint256 buyId = _createBuyOrder(alice, buyAmt, price, 0, 0);
         uint256 sellId = _createSellOrder(bob, sellAmt, price, 0, 0);
 
-        exchange.matchOrders(buyId, sellId);
+        exchange.matchOrders(buyId, sellId, block.timestamp + 1);
 
         Order memory buyOrder = exchange.getOrder(buyId);
         Order memory sellOrder = exchange.getOrder(sellId);
@@ -370,10 +407,6 @@ contract WindmillExchangeTest is Test {
         assertGt(buyOrder.remainingIn, 0, "buy.remainingIn should not be 0 yet");
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // matchOrders — reverts
-    // ─────────────────────────────────────────────────────────────────────────
-
     function test_matchOrders_revert_expired() public {
         vm.warp(1000);
         uint256 expiry = 1500;
@@ -385,7 +418,7 @@ contract WindmillExchangeTest is Test {
         // Advance past expiry
         vm.warp(expiry + 1);
         vm.expectRevert(OrderExpired.selector);
-        exchange.matchOrders(buyId, sellId);
+        exchange.matchOrders(buyId, sellId, block.timestamp + 1);
     }
 
     function test_matchOrders_revert_selfMatch() public {
@@ -400,11 +433,11 @@ contract WindmillExchangeTest is Test {
         // Alice creates the sell order too
         vm.prank(alice);
         uint256 sellId = exchange.createOrder(
-            address(tokenB), address(tokenA), 100 ether, price, 0, 0, 0, 0, false
+            address(tokenB), address(tokenA), 100 ether, price, address(0), 0, 0, 0, 0, false
         );
 
         vm.expectRevert(SelfMatch.selector);
-        exchange.matchOrders(buyId, sellId);
+        exchange.matchOrders(buyId, sellId, block.timestamp + 1);
     }
 
     function test_matchOrders_revert_noCross() public {
@@ -413,7 +446,7 @@ contract WindmillExchangeTest is Test {
         uint256 sellId = _createSellOrder(bob, 100 ether, RAY * 2, 0, 0);
 
         vm.expectRevert(NoCross.selector);
-        exchange.matchOrders(buyId, sellId);
+        exchange.matchOrders(buyId, sellId, block.timestamp + 1);
     }
 
     function test_matchOrders_revert_pairMismatch_wrongIsBuy() public {
@@ -426,19 +459,11 @@ contract WindmillExchangeTest is Test {
         tokenA.approve(address(exchange), type(uint256).max);
         vm.prank(bob);
         uint256 wrongSellId = exchange.createOrder(
-            address(tokenA),
-            address(tokenB),
-            100 ether,
-            RAY,
-            0,
-            0,
-            0,
-            0,
-            true // isBuy=true on sell side
+            address(tokenA), address(tokenB), 100 ether, RAY, address(0), 0, 0, 0, 0, true
         );
 
         vm.expectRevert(PairMismatch.selector);
-        exchange.matchOrders(buyId, wrongSellId);
+        exchange.matchOrders(buyId, wrongSellId, block.timestamp + 1);
     }
 
     function test_matchOrders_revert_pairMismatch_differentTokens() public {
@@ -453,16 +478,12 @@ contract WindmillExchangeTest is Test {
         // Sell order for tokenC→tokenA instead of tokenB→tokenA
         vm.prank(bob);
         uint256 sellId = exchange.createOrder(
-            address(tokenC), address(tokenA), 100 ether, RAY, 0, 0, 0, 0, false
+            address(tokenC), address(tokenA), 100 ether, RAY, address(0), 0, 0, 0, 0, false
         );
 
         vm.expectRevert(PairMismatch.selector);
-        exchange.matchOrders(buyId, sellId);
+        exchange.matchOrders(buyId, sellId, block.timestamp + 1);
     }
-
-    // ─────────────────────────────────────────────────────────────────────────
-    // currentPrice
-    // ─────────────────────────────────────────────────────────────────────────
 
     function test_currentPrice_flatOrder_returnsStartPrice() public {
         uint256 startPrice = 3 * RAY;
@@ -492,7 +513,7 @@ contract WindmillExchangeTest is Test {
         uint256 buyId = _createBuyOrder(alice, 100 ether, price, 0, 0);
         uint256 sellId = _createSellOrder(bob, 100 ether, price, 0, 0);
 
-        exchange.matchOrders(buyId, sellId);
+        exchange.matchOrders(buyId, sellId, block.timestamp + 1);
 
         // Order is inactive but getOrder still allows reading; price is still computable
         Order memory o = exchange.getOrder(buyId);
@@ -500,10 +521,6 @@ contract WindmillExchangeTest is Test {
         // currentPrice still returns a value based on stored params (no revert)
         assertEq(exchange.currentPrice(buyId, block.timestamp), price);
     }
-
-    // ─────────────────────────────────────────────────────────────────────────
-    // Fuzz
-    // ─────────────────────────────────────────────────────────────────────────
 
     function testFuzz_escrow(uint96 amount) public {
         vm.assume(amount > 0);
