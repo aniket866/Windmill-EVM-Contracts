@@ -1,0 +1,26 @@
+# Foundry
+broadcast/
+cache/
+out/
+
+# Dependencies
+lib/
+node_modules/
+
+# Coverage and gas outputs
+coverage/
+lcov.info
+
+# Secrets and env files
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+
+# Editor and OS artifacts
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

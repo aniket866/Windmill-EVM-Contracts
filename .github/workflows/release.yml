@@ -1,0 +1,70 @@
+name: Release Artifacts
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version tag (e.g., v1.0.0) - leave empty for branch-based artifacts"
+        required: false
+        type: string
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build and Publish
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          submodules: recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: "1.5.1"
+
+      - name: Install dependencies
+        run: forge install foundry-rs/forge-std
+
+      # Release should only happen if project builds and tests cleanly.
+      - name: Build contracts
+        run: forge build --sizes
+
+      - name: Run tests
+        run: forge test -vvv
+
+      - name: Determine version
+        id: version
+        run: |
+          if [ -n "${{ inputs.version }}" ]; then
+            echo "tag=${{ inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "tag=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Package artifacts
+        run: tar -czf evm-contract-artifacts-${{ steps.version.outputs.tag }}.tar.gz out
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: evm-contract-artifacts-${{ steps.version.outputs.tag }}
+          path: evm-contract-artifacts-${{ steps.version.outputs.tag }}.tar.gz
+
+      - name: Publish GitHub release assets
+        if: github.ref_type == 'tag' || inputs.version != ''
+        uses: softprops/action-gh-release@v2
+        with:
+          files: evm-contract-artifacts-${{ steps.version.outputs.tag }}.tar.gz
+          tag_name: ${{ inputs.version || github.ref_name }}
+          draft: ${{ github.ref_type != 'tag' }}
