@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.23;
 
-// ── Errors
+// ── Errors ────────────────────────────────────────────────────────────────────
 
 error ZeroAddress();
 error SameToken();
@@ -20,7 +20,7 @@ error ZeroSettlementPrice();
 error OrderNotFound();
 error TransferFailed();
 
-// ── Types
+// ── Types ─────────────────────────────────────────────────────────────────────
 
 struct Order {
     uint256 id;
@@ -39,7 +39,7 @@ struct Order {
     uint256 expiry;
 }
 
-// ── Math
+// ── Math ──────────────────────────────────────────────────────────────────────
 
 uint256 constant RAY = 1e27;
 
@@ -96,7 +96,7 @@ function absInt(int256 x) pure returns (uint256) {
     return x >= 0 ? uint256(x) : uint256(-x);
 }
 
-// ── Price Curve
+// ── Price Curve ───────────────────────────────────────────────────────────────
 
 function computePrice(
     uint256 startPrice,
@@ -136,11 +136,10 @@ function orderPrice(Order memory o, uint256 ts) pure returns (uint256) {
     return computePrice(o.startPrice, o.slope, o.createdAt, o.minPrice, o.maxPrice, ts);
 }
 
-// ── Token Transfer
+// ── Token Transfer ────────────────────────────────────────────────────────────
 
 function _balanceOf(address token, address account) view returns (uint256 bal) {
-    (bool ok, bytes memory data) =
-        token.staticcall(abi.encodeWithSignature("balanceOf(address)", account));
+    (bool ok, bytes memory data) = token.staticcall(abi.encodeWithSignature("balanceOf(address)", account));
     require(ok && data.length >= 32, "balanceOf failed");
     bal = abi.decode(data, (uint256));
 }
@@ -161,14 +160,13 @@ function safeTransferFrom(address token, address from, address to, uint256 amoun
     if (amount == 0) return;
     if (token.code.length == 0) revert TransferFailed();
     uint256 pre = _balanceOf(token, to);
-    (bool ok, bytes memory data) = token.call(
-        abi.encodeWithSignature("transferFrom(address,address,uint256)", from, to, amount)
-    );
+    (bool ok, bytes memory data) =
+        token.call(abi.encodeWithSignature("transferFrom(address,address,uint256)", from, to, amount));
     if (!ok || (data.length != 0 && !abi.decode(data, (bool)))) revert TransferFailed();
     if (_balanceOf(token, to) - pre != amount) revert TransferFailed();
 }
 
-// ── Exchange
+// ── Exchange ──────────────────────────────────────────────────────────────────
 
 contract WindmillExchange {
     uint256 private _reentrancyStatus = 1;
@@ -189,27 +187,14 @@ contract WindmillExchange {
         _reentrancyStatus = 1;
     }
 
-    event OrderCreated(
-        uint256 indexed orderId,
-        address indexed maker,
-        address indexed tokenIn,
-        address tokenOut,
-        uint256 amountIn,
-        bool isBuy
-    );
+    event OrderCreated(uint256 indexed orderId, address indexed maker, address indexed tokenIn, address tokenOut, uint256 amountIn, bool isBuy);
     event OrderCancelled(uint256 indexed orderId, address indexed maker, uint256 refund);
-    event OrderMatched(
-        uint256 indexed buyOrderId,
-        uint256 indexed sellOrderId,
-        address indexed keeper,
-        uint256 settlementPrice,
-        uint256 filledAmount
-    );
+    event OrderMatched(uint256 indexed buyOrderId, uint256 indexed sellOrderId, address indexed keeper, uint256 settlementPrice, uint256 filledAmount);
     event OrderFilled(uint256 indexed orderId);
     event OrderPartiallyFilled(uint256 indexed orderId, uint256 remainingIn);
     event OrderPruned(uint256 indexed orderId);
 
-    // ── External
+    // ── External ──────────────────────────────────────────────────────────────
 
     function createOrder(
         address tokenIn,
@@ -231,20 +216,12 @@ contract WindmillExchange {
         if (slope != 0 && absInt(slope) > SLOPE_ABS_LIMIT) revert SlopeOverflow();
 
         Order memory order = Order({
-            id: 0,
-            maker: msg.sender,
-            isBuy: isBuy,
-            active: true,
-            tokenIn: tokenIn,
-            tokenOut: tokenOut,
-            amountIn: amountIn,
-            remainingIn: amountIn,
-            startPrice: startPrice,
-            slope: slope,
-            minPrice: minPrice,
-            maxPrice: maxPrice,
-            createdAt: block.timestamp,
-            expiry: expiry
+            id: 0, maker: msg.sender, isBuy: isBuy, active: true,
+            tokenIn: tokenIn, tokenOut: tokenOut,
+            amountIn: amountIn, remainingIn: amountIn,
+            startPrice: startPrice, slope: slope,
+            minPrice: minPrice, maxPrice: maxPrice,
+            createdAt: block.timestamp, expiry: expiry
         });
 
         orderId = _nextOrderId++;
@@ -287,8 +264,7 @@ contract WindmillExchange {
         if (buy.maker == sell.maker) revert SelfMatch();
         if (orderPrice(buy, block.timestamp) < orderPrice(sell, block.timestamp)) revert NoCross();
 
-        uint256 settlementPx =
-            midpoint(orderPrice(buy, block.timestamp), orderPrice(sell, block.timestamp));
+        uint256 settlementPx = midpoint(orderPrice(buy, block.timestamp), orderPrice(sell, block.timestamp));
         if (settlementPx == 0) revert ZeroSettlementPrice();
 
         uint256 maxAsset = mulDiv(buy.remainingIn, settlementPx, RAY);
@@ -302,21 +278,11 @@ contract WindmillExchange {
         uint256 newBuyRemaining = buy.remainingIn - paymentOwed;
         uint256 newSellRemaining = sell.remainingIn - filledAsset;
 
-        if (buyFilled) {
-            _orders[buyOrderId].active = false;
-            _pairRemove(buy.tokenIn, buy.tokenOut, buyOrderId);
-        } else {
-            _orders[buyOrderId].remainingIn = newBuyRemaining;
-            _orders[buyOrderId].createdAt = block.timestamp;
-        }
+        if (buyFilled) { _orders[buyOrderId].active = false; _pairRemove(buy.tokenIn, buy.tokenOut, buyOrderId); }
+        else { _orders[buyOrderId].remainingIn = newBuyRemaining; _orders[buyOrderId].createdAt = block.timestamp; }
 
-        if (sellFilled) {
-            _orders[sellOrderId].active = false;
-            _pairRemove(sell.tokenIn, sell.tokenOut, sellOrderId);
-        } else {
-            _orders[sellOrderId].remainingIn = newSellRemaining;
-            _orders[sellOrderId].createdAt = block.timestamp;
-        }
+        if (sellFilled) { _orders[sellOrderId].active = false; _pairRemove(sell.tokenIn, sell.tokenOut, sellOrderId); }
+        else { _orders[sellOrderId].remainingIn = newSellRemaining; _orders[sellOrderId].createdAt = block.timestamp; }
 
         uint256 keeperFee = paymentOwed / 1000;
         safeTransfer(sell.tokenIn, buy.maker, filledAsset);
@@ -324,10 +290,8 @@ contract WindmillExchange {
         safeTransfer(buy.tokenIn, msg.sender, keeperFee);
 
         emit OrderMatched(buyOrderId, sellOrderId, msg.sender, settlementPx, filledAsset);
-        if (buyFilled) emit OrderFilled(buyOrderId);
-        else emit OrderPartiallyFilled(buyOrderId, newBuyRemaining);
-        if (sellFilled) emit OrderFilled(sellOrderId);
-        else emit OrderPartiallyFilled(sellOrderId, newSellRemaining);
+        if (buyFilled) emit OrderFilled(buyOrderId); else emit OrderPartiallyFilled(buyOrderId, newBuyRemaining);
+        if (sellFilled) emit OrderFilled(sellOrderId); else emit OrderPartiallyFilled(sellOrderId, newSellRemaining);
     }
 
     function currentPrice(uint256 orderId, uint256 timestamp) external view returns (uint256) {
@@ -339,18 +303,14 @@ contract WindmillExchange {
     }
 
     function getOrdersByPair(address tokenA, address tokenB, uint256 cursor, uint256 limit)
-        external
-        view
-        returns (uint256[] memory)
+        external view returns (uint256[] memory)
     {
         uint256[] storage all = _pairOrders[_pairKey(tokenA, tokenB)];
         uint256 total = all.length;
         if (cursor >= total) return new uint256[](0);
         uint256 size = (total - cursor) < limit ? (total - cursor) : limit;
         uint256[] memory result = new uint256[](size);
-        for (uint256 i; i < size; i++) {
-            result[i] = all[cursor + i];
-        }
+        for (uint256 i; i < size; i++) result[i] = all[cursor + i];
         return result;
     }
 
@@ -360,7 +320,7 @@ contract WindmillExchange {
 
     /// @notice Permissionless cleanup: deactivates expired orders from a pair's index.
     /// @param limit Max orders to scan per call to bound gas.
-    function pruneExpiredOrders(address tokenA, address tokenB, uint256 limit) external {
+    function pruneExpiredOrders(address tokenA, address tokenB, uint256 limit) external nonReentrant {
         bytes32 key = _pairKey(tokenA, tokenB);
         uint256[] storage list = _pairOrders[key];
         uint256 pruned = 0;
@@ -369,7 +329,11 @@ contract WindmillExchange {
             uint256 id = list[i];
             Order storage o = _orders[id];
             if (o.expiry != 0 && block.timestamp > o.expiry && o.active) {
+                uint256 refund = o.remainingIn;
+                address maker = o.maker;
+                address tokenIn = o.tokenIn;
                 o.active = false;
+                o.remainingIn = 0;
                 // swap-and-pop
                 uint256 last = list.length;
                 uint256 idx = _pairIndex[key][id];
@@ -380,6 +344,7 @@ contract WindmillExchange {
                 }
                 list.pop();
                 delete _pairIndex[key][id];
+                safeTransfer(tokenIn, maker, refund);
                 emit OrderPruned(id);
                 pruned++;
                 // i stays — we just moved a new element into position i
@@ -389,7 +354,7 @@ contract WindmillExchange {
         }
     }
 
-    // ── Internal
+    // ── Internal ──────────────────────────────────────────────────────────────
 
     function _order(uint256 id) private view returns (Order storage) {
         if (_orders[id].maker == address(0)) revert OrderNotFound();
