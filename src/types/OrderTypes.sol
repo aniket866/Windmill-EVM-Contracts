@@ -7,14 +7,14 @@ pragma solidity ^0.8.23;
 struct Order {
     uint256 id;
     address maker;
-    bool    isBuy;
-    bool    active;
+    bool isBuy;
+    bool active;
     address tokenIn;
     address tokenOut;
     uint256 amountIn;
     uint256 remainingIn;
     uint256 startPrice;
-    int256  slope;
+    int256 slope;
     uint256 minPrice;
     uint256 maxPrice;
     uint256 createdAt;

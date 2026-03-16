@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.23;
 
-import {Test} from "forge-std/Test.sol";
-import {WindmillExchange} from "../src/core/WindmillExchange.sol";
-import {Order} from "../src/types/OrderTypes.sol";
+import { Test } from "forge-std/Test.sol";
+import { WindmillExchange } from "../src/core/WindmillExchange.sol";
+import { Order } from "../src/types/OrderTypes.sol";
 import {
     ZeroAddress,
     ZeroAmount,
@@ -21,32 +21,32 @@ import {
 } from "../src/core/WindmillExchange.sol";
 
 contract MockERC20 {
-    string  public name;
-    string  public symbol;
-    uint8   public constant decimals = 18;
+    string public name;
+    string public symbol;
+    uint8 public constant decimals = 18;
     uint256 public totalSupply;
 
-    mapping(address => uint256)                     public balanceOf;
+    mapping(address => uint256) public balanceOf;
     mapping(address => mapping(address => uint256)) public allowance;
 
-    event Transfer(address indexed from, address indexed to,       uint256 value);
+    event Transfer(address indexed from, address indexed to, uint256 value);
     event Approval(address indexed owner, address indexed spender, uint256 value);
 
     constructor(string memory _name, string memory _symbol) {
-        name   = _name;
+        name = _name;
         symbol = _symbol;
     }
 
     function mint(address to, uint256 amount) external {
         balanceOf[to] += amount;
-        totalSupply    += amount;
+        totalSupply += amount;
         emit Transfer(address(0), to, amount);
     }
 
     function transfer(address to, uint256 amount) external returns (bool) {
         require(balanceOf[msg.sender] >= amount, "insufficient");
         balanceOf[msg.sender] -= amount;
-        balanceOf[to]         += amount;
+        balanceOf[to] += amount;
         emit Transfer(msg.sender, to, amount);
         return true;
     }
@@ -58,7 +58,7 @@ contract MockERC20 {
             allowance[from][msg.sender] -= amount;
         }
         balanceOf[from] -= amount;
-        balanceOf[to]   += amount;
+        balanceOf[to] += amount;
         emit Transfer(from, to, amount);
         return true;
     }
@@ -74,24 +74,28 @@ contract WindmillExchangeTest is Test {
     uint256 internal constant RAY = 1e27;
 
     WindmillExchange internal exchange;
-    MockERC20        internal tokenA;
-    MockERC20        internal tokenB;
+    MockERC20 internal tokenA;
+    MockERC20 internal tokenB;
 
-    address internal alice  = makeAddr("alice");
-    address internal bob    = makeAddr("bob");
+    address internal alice = makeAddr("alice");
+    address internal bob = makeAddr("bob");
 
     function setUp() public {
         exchange = new WindmillExchange();
-        tokenA   = new MockERC20("TokenA", "TKNA");
-        tokenB   = new MockERC20("TokenB", "TKNB");
+        tokenA = new MockERC20("TokenA", "TKNA");
+        tokenB = new MockERC20("TokenB", "TKNB");
 
         tokenA.mint(alice, 1_000_000 ether);
-        tokenB.mint(bob,   1_000_000 ether);
+        tokenB.mint(bob, 1_000_000 ether);
 
-        vm.prank(alice); tokenA.approve(address(exchange), type(uint256).max);
-        vm.prank(alice); tokenB.approve(address(exchange), type(uint256).max);
-        vm.prank(bob);   tokenA.approve(address(exchange), type(uint256).max);
-        vm.prank(bob);   tokenB.approve(address(exchange), type(uint256).max);
+        vm.prank(alice);
+        tokenA.approve(address(exchange), type(uint256).max);
+        vm.prank(alice);
+        tokenB.approve(address(exchange), type(uint256).max);
+        vm.prank(bob);
+        tokenA.approve(address(exchange), type(uint256).max);
+        vm.prank(bob);
+        tokenB.approve(address(exchange), type(uint256).max);
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -99,19 +103,31 @@ contract WindmillExchangeTest is Test {
     // ─────────────────────────────────────────────────────────────────────────
 
     /// @dev Alice buys tokenB with tokenA.  tokenIn=tokenA, tokenOut=tokenB.
-    function _createBuyOrder(address maker, uint256 amountIn, uint256 startPrice, int256 slope, uint256 expiry)
-        internal returns (uint256)
-    {
+    function _createBuyOrder(
+        address maker,
+        uint256 amountIn,
+        uint256 startPrice,
+        int256 slope,
+        uint256 expiry
+    ) internal returns (uint256) {
         vm.prank(maker);
-        return exchange.createOrder(address(tokenA), address(tokenB), amountIn, startPrice, slope, 0, 0, expiry, true);
+        return exchange.createOrder(
+            address(tokenA), address(tokenB), amountIn, startPrice, slope, 0, 0, expiry, true
+        );
     }
 
     /// @dev Bob sells tokenB for tokenA.  tokenIn=tokenB, tokenOut=tokenA.
-    function _createSellOrder(address maker, uint256 amountIn, uint256 startPrice, int256 slope, uint256 expiry)
-        internal returns (uint256)
-    {
+    function _createSellOrder(
+        address maker,
+        uint256 amountIn,
+        uint256 startPrice,
+        int256 slope,
+        uint256 expiry
+    ) internal returns (uint256) {
         vm.prank(maker);
-        return exchange.createOrder(address(tokenB), address(tokenA), amountIn, startPrice, slope, 0, 0, expiry, false);
+        return exchange.createOrder(
+            address(tokenB), address(tokenA), amountIn, startPrice, slope, 0, 0, expiry, false
+        );
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -119,7 +135,7 @@ contract WindmillExchangeTest is Test {
     // ─────────────────────────────────────────────────────────────────────────
 
     function test_createBuyOrder_success() public {
-        uint256 amount     = 1000 ether;
+        uint256 amount = 1000 ether;
         uint256 startPrice = 2 * RAY;
 
         vm.expectEmit(true, true, true, true);
@@ -130,12 +146,12 @@ contract WindmillExchangeTest is Test {
         assertEq(id, 1);
 
         Order memory o = exchange.getOrder(id);
-        assertEq(o.maker,       alice);
-        assertEq(o.tokenIn,     address(tokenA));
-        assertEq(o.tokenOut,    address(tokenB));
-        assertEq(o.amountIn,    amount);
+        assertEq(o.maker, alice);
+        assertEq(o.tokenIn, address(tokenA));
+        assertEq(o.tokenOut, address(tokenB));
+        assertEq(o.amountIn, amount);
         assertEq(o.remainingIn, amount);
-        assertEq(o.startPrice,  startPrice);
+        assertEq(o.startPrice, startPrice);
         assertTrue(o.isBuy);
         assertTrue(o.active);
 
@@ -145,11 +161,11 @@ contract WindmillExchangeTest is Test {
 
     function test_createSellOrder_success() public {
         uint256 amount = 500 ether;
-        uint256 id     = _createSellOrder(bob, amount, 2 * RAY, 0, 0);
+        uint256 id = _createSellOrder(bob, amount, 2 * RAY, 0, 0);
 
         Order memory o = exchange.getOrder(id);
         assertFalse(o.isBuy);
-        assertEq(o.tokenIn,  address(tokenB));
+        assertEq(o.tokenIn, address(tokenB));
         assertEq(o.tokenOut, address(tokenA));
         assertEq(tokenB.balanceOf(address(exchange)), amount);
     }
@@ -168,7 +184,7 @@ contract WindmillExchangeTest is Test {
 
     function test_ordersByPair_registered() public {
         _createBuyOrder(alice, 100 ether, RAY, 0, 0);
-        _createSellOrder(bob,  100 ether, RAY, 0, 0);
+        _createSellOrder(bob, 100 ether, RAY, 0, 0);
         assertEq(exchange.getOrdersByPair(address(tokenA), address(tokenB)).length, 2);
     }
 
@@ -216,7 +232,9 @@ contract WindmillExchangeTest is Test {
     function test_createOrder_revert_slopeOverflow() public {
         vm.prank(alice);
         vm.expectRevert(SlopeOverflow.selector);
-        exchange.createOrder(address(tokenA), address(tokenB), 100 ether, RAY, type(int128).max, 0, 0, 0, true);
+        exchange.createOrder(
+            address(tokenA), address(tokenB), 100 ether, RAY, type(int128).max, 0, 0, 0, true
+        );
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -248,7 +266,8 @@ contract WindmillExchangeTest is Test {
 
     function test_cancelOrder_revert_alreadyInactive() public {
         uint256 id = _createBuyOrder(alice, 100 ether, RAY, 0, 0);
-        vm.prank(alice); exchange.cancelOrder(id);
+        vm.prank(alice);
+        exchange.cancelOrder(id);
         vm.prank(alice);
         vm.expectRevert(OrderInactive.selector);
         exchange.cancelOrder(id);
@@ -263,20 +282,20 @@ contract WindmillExchangeTest is Test {
     ///      When an order is fully filled, _deactivateOrder is called (not _updateRemainingIn),
     ///      so `remainingIn` in storage is unchanged — test checks active==false instead.
     function test_matchOrders_success_fullFill() public {
-        uint256 price  = RAY;          // 1 tokenA per tokenB
+        uint256 price = RAY; // 1 tokenA per tokenB
         uint256 amount = 100 ether;
 
         // At price = 1 RAY, 100 tokenA buys exactly 100 tokenB.
-        uint256 buyId  = _createBuyOrder(alice, amount, price, 0, 0);   // pays tokenA
-        uint256 sellId = _createSellOrder(bob,  amount, price, 0, 0);   // pays tokenB
+        uint256 buyId = _createBuyOrder(alice, amount, price, 0, 0); // pays tokenA
+        uint256 sellId = _createSellOrder(bob, amount, price, 0, 0); // pays tokenB
 
         uint256 aliceTokenBBefore = tokenB.balanceOf(alice);
-        uint256 bobTokenABefore   = tokenA.balanceOf(bob);
+        uint256 bobTokenABefore = tokenA.balanceOf(bob);
 
         exchange.matchOrders(buyId, sellId);
 
         // Both orders should be deactivated (fully filled)
-        assertFalse(exchange.getOrder(buyId).active,  "buy should be inactive");
+        assertFalse(exchange.getOrder(buyId).active, "buy should be inactive");
         assertFalse(exchange.getOrder(sellId).active, "sell should be inactive");
 
         // Alice should have received tokenB (filledAsset from sell order)
@@ -294,55 +313,55 @@ contract WindmillExchangeTest is Test {
 
     /// @dev Buy order is smaller than sell order → buy fully fills, sell is partial.
     function test_matchOrders_partialFill_buySmaller() public {
-        uint256 price    = RAY;
-        uint256 buyAmt   = 50 ether;   // buyer deposits 50 tokenA
-        uint256 sellAmt  = 100 ether;  // seller deposits 100 tokenB
+        uint256 price = RAY;
+        uint256 buyAmt = 50 ether; // buyer deposits 50 tokenA
+        uint256 sellAmt = 100 ether; // seller deposits 100 tokenB
 
-        uint256 buyId  = _createBuyOrder(alice, buyAmt,  price, 0, 0);
-        uint256 sellId = _createSellOrder(bob,  sellAmt, price, 0, 0);
+        uint256 buyId = _createBuyOrder(alice, buyAmt, price, 0, 0);
+        uint256 sellId = _createSellOrder(bob, sellAmt, price, 0, 0);
 
         exchange.matchOrders(buyId, sellId);
 
-        Order memory buyOrder  = exchange.getOrder(buyId);
+        Order memory buyOrder = exchange.getOrder(buyId);
         Order memory sellOrder = exchange.getOrder(sellId);
 
         // Buy fully consumed — deactivated (remainingIn in storage is unchanged;
         // _updateRemainingIn is only called for partial fills)
-        assertFalse(buyOrder.active,            "buy should be inactive after full fill");
+        assertFalse(buyOrder.active, "buy should be inactive after full fill");
 
         // Sell still active with reduced remaining
-        assertTrue(sellOrder.active,            "sell should still be active");
+        assertTrue(sellOrder.active, "sell should still be active");
         assertLt(sellOrder.remainingIn, sellAmt, "sell.remainingIn should have decreased");
-        assertGt(sellOrder.remainingIn, 0,       "sell.remainingIn should not be 0 yet");
+        assertGt(sellOrder.remainingIn, 0, "sell.remainingIn should not be 0 yet");
 
         // Alice received tokenB
         assertGt(tokenB.balanceOf(alice), 0, "alice should receive some tokenB");
         // Bob received tokenA
-        assertGt(tokenA.balanceOf(bob), 0,   "bob should receive some tokenA");
+        assertGt(tokenA.balanceOf(bob), 0, "bob should receive some tokenA");
     }
 
     /// @dev Sell order is smaller than buy order → sell fully fills, buy is partial.
     ///      When fully filled, _deactivateOrder is called but _updateRemainingIn is NOT.
     function test_matchOrders_partialFill_sellSmaller() public {
-        uint256 price    = RAY;
-        uint256 buyAmt   = 100 ether;  // buyer deposits 100 tokenA
-        uint256 sellAmt  = 40 ether;   // seller deposits 40 tokenB
+        uint256 price = RAY;
+        uint256 buyAmt = 100 ether; // buyer deposits 100 tokenA
+        uint256 sellAmt = 40 ether; // seller deposits 40 tokenB
 
-        uint256 buyId  = _createBuyOrder(alice, buyAmt,  price, 0, 0);
-        uint256 sellId = _createSellOrder(bob,  sellAmt, price, 0, 0);
+        uint256 buyId = _createBuyOrder(alice, buyAmt, price, 0, 0);
+        uint256 sellId = _createSellOrder(bob, sellAmt, price, 0, 0);
 
         exchange.matchOrders(buyId, sellId);
 
-        Order memory buyOrder  = exchange.getOrder(buyId);
+        Order memory buyOrder = exchange.getOrder(buyId);
         Order memory sellOrder = exchange.getOrder(sellId);
 
         // Sell fully consumed — deactivated
-        assertFalse(sellOrder.active,           "sell should be inactive after full fill");
+        assertFalse(sellOrder.active, "sell should be inactive after full fill");
 
         // Buy still active with reduced remaining
-        assertTrue(buyOrder.active,             "buy should still be active");
-        assertLt(buyOrder.remainingIn, buyAmt,  "buy.remainingIn should have decreased");
-        assertGt(buyOrder.remainingIn, 0,       "buy.remainingIn should not be 0 yet");
+        assertTrue(buyOrder.active, "buy should still be active");
+        assertLt(buyOrder.remainingIn, buyAmt, "buy.remainingIn should have decreased");
+        assertGt(buyOrder.remainingIn, 0, "buy.remainingIn should not be 0 yet");
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -352,10 +371,10 @@ contract WindmillExchangeTest is Test {
     function test_matchOrders_revert_expired() public {
         vm.warp(1000);
         uint256 expiry = 1500;
-        uint256 price  = RAY;
+        uint256 price = RAY;
 
-        uint256 buyId  = _createBuyOrder(alice, 100 ether, price, 0, expiry);
-        uint256 sellId = _createSellOrder(bob,  100 ether, price, 0, 0);
+        uint256 buyId = _createBuyOrder(alice, 100 ether, price, 0, expiry);
+        uint256 sellId = _createSellOrder(bob, 100 ether, price, 0, 0);
 
         // Advance past expiry
         vm.warp(expiry + 1);
@@ -366,7 +385,8 @@ contract WindmillExchangeTest is Test {
     function test_matchOrders_revert_selfMatch() public {
         // Give alice tokenB as well so she can create both sides
         tokenB.mint(alice, 100 ether);
-        vm.prank(alice); tokenB.approve(address(exchange), type(uint256).max);
+        vm.prank(alice);
+        tokenB.approve(address(exchange), type(uint256).max);
 
         uint256 price = RAY;
         uint256 buyId = _createBuyOrder(alice, 100 ether, price, 0, 0);
@@ -383,8 +403,8 @@ contract WindmillExchangeTest is Test {
 
     function test_matchOrders_revert_noCross() public {
         // buyPrice (0.5 RAY) < sellPrice (2 RAY) → no crossing
-        uint256 buyId  = _createBuyOrder(alice, 100 ether, RAY / 2, 0, 0);
-        uint256 sellId = _createSellOrder(bob,  100 ether, RAY * 2, 0, 0);
+        uint256 buyId = _createBuyOrder(alice, 100 ether, RAY / 2, 0, 0);
+        uint256 sellId = _createSellOrder(bob, 100 ether, RAY * 2, 0, 0);
 
         vm.expectRevert(NoCross.selector);
         exchange.matchOrders(buyId, sellId);
@@ -396,10 +416,19 @@ contract WindmillExchangeTest is Test {
 
         // Bob creates another buy-side order (isBuy=true) to act as the "sell" argument
         tokenA.mint(bob, 100 ether);
-        vm.prank(bob); tokenA.approve(address(exchange), type(uint256).max);
+        vm.prank(bob);
+        tokenA.approve(address(exchange), type(uint256).max);
         vm.prank(bob);
         uint256 wrongSellId = exchange.createOrder(
-            address(tokenA), address(tokenB), 100 ether, RAY, 0, 0, 0, 0, true  // isBuy=true on sell side
+            address(tokenA),
+            address(tokenB),
+            100 ether,
+            RAY,
+            0,
+            0,
+            0,
+            0,
+            true // isBuy=true on sell side
         );
 
         vm.expectRevert(PairMismatch.selector);
@@ -410,7 +439,8 @@ contract WindmillExchangeTest is Test {
         // Introduce a third token to create a genuine pair mismatch
         MockERC20 tokenC = new MockERC20("TokenC", "TKNC");
         tokenC.mint(bob, 100 ether);
-        vm.prank(bob); tokenC.approve(address(exchange), type(uint256).max);
+        vm.prank(bob);
+        tokenC.approve(address(exchange), type(uint256).max);
 
         uint256 buyId = _createBuyOrder(alice, 100 ether, RAY, 0, 0);
 
@@ -433,18 +463,18 @@ contract WindmillExchangeTest is Test {
         uint256 id = _createBuyOrder(alice, 100 ether, startPrice, 0, 0);
 
         // With slope=0, price should always equal startPrice regardless of timestamp
-        assertEq(exchange.currentPrice(id, block.timestamp),         startPrice);
+        assertEq(exchange.currentPrice(id, block.timestamp), startPrice);
         assertEq(exchange.currentPrice(id, block.timestamp + 1 days), startPrice);
     }
 
     function test_currentPrice_descendingSlope_decreasesOverTime() public {
         uint256 startPrice = 4 * RAY;
-        int256  slope      = -int256(RAY / 1000);  // price decreases 1e24 per second
+        int256 slope = -int256(RAY / 1000); // price decreases 1e24 per second
 
         uint256 id = _createBuyOrder(alice, 100 ether, startPrice, slope, 0);
         uint256 t0 = block.timestamp;
 
-        uint256 priceNow   = exchange.currentPrice(id, t0);
+        uint256 priceNow = exchange.currentPrice(id, t0);
         uint256 priceLater = exchange.currentPrice(id, t0 + 1000);
 
         assertEq(priceNow, startPrice);
@@ -453,8 +483,8 @@ contract WindmillExchangeTest is Test {
 
     function test_currentPrice_afterFullMatch_orderInactive() public {
         uint256 price = RAY;
-        uint256 buyId  = _createBuyOrder(alice, 100 ether, price, 0, 0);
-        uint256 sellId = _createSellOrder(bob,  100 ether, price, 0, 0);
+        uint256 buyId = _createBuyOrder(alice, 100 ether, price, 0, 0);
+        uint256 sellId = _createSellOrder(bob, 100 ether, price, 0, 0);
 
         exchange.matchOrders(buyId, sellId);
 

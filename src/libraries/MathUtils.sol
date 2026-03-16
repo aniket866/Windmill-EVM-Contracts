@@ -74,12 +74,16 @@ library MathUtils {
     /// @param hi    Upper bound (pass 0 to disable).
     /// @return      The clamped value.
     function clamp(uint256 value, uint256 lo, uint256 hi) internal pure returns (uint256) {
+        require(lo == 0 || hi == 0 || lo <= hi, "MathUtils: invalid bounds");
         if (lo != 0 && value < lo) return lo;
         if (hi != 0 && value > hi) return hi;
         return value;
     }
 
     function abs(int256 x) internal pure returns (uint256) {
+        if (x == type(int256).min) {
+            return 2 ** 255;
+        }
         return x >= 0 ? uint256(x) : uint256(-x);
     }
 }

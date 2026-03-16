@@ -1,31 +1,57 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.23;
 
-import {Order} from "../types/OrderTypes.sol";
-import {MathUtils} from "./MathUtils.sol";
+import { Order } from "../types/OrderTypes.sol";
+import { MathUtils } from "./MathUtils.sol";
 
 library PriceCurve {
     using MathUtils for uint256;
 
     function currentPrice(Order storage order, uint256 timestamp) internal view returns (uint256) {
-        return _compute(order.startPrice, order.slope, order.createdAt, order.minPrice, order.maxPrice, timestamp);
+        return _compute(
+            order.startPrice,
+            order.slope,
+            order.createdAt,
+            order.minPrice,
+            order.maxPrice,
+            timestamp
+        );
     }
 
-    function currentPriceMem(Order memory order, uint256 timestamp) internal pure returns (uint256) {
-        return _compute(order.startPrice, order.slope, order.createdAt, order.minPrice, order.maxPrice, timestamp);
+    function currentPriceMem(Order memory order, uint256 timestamp)
+        internal
+        pure
+        returns (uint256)
+    {
+        return _compute(
+            order.startPrice,
+            order.slope,
+            order.createdAt,
+            order.minPrice,
+            order.maxPrice,
+            timestamp
+        );
     }
 
-    function hasCrossed(Order memory buy, Order memory sell, uint256 timestamp) internal pure returns (bool) {
+    function hasCrossed(Order memory buy, Order memory sell, uint256 timestamp)
+        internal
+        pure
+        returns (bool)
+    {
         return currentPriceMem(buy, timestamp) >= currentPriceMem(sell, timestamp);
     }
 
-    function settlementPrice(Order memory buy, Order memory sell, uint256 timestamp) internal pure returns (uint256) {
+    function settlementPrice(Order memory buy, Order memory sell, uint256 timestamp)
+        internal
+        pure
+        returns (uint256)
+    {
         return MathUtils.midpoint(currentPriceMem(buy, timestamp), currentPriceMem(sell, timestamp));
     }
 
     function _compute(
         uint256 startPrice,
-        int256  slope,
+        int256 slope,
         uint256 createdAt,
         uint256 minPrice,
         uint256 maxPrice,
@@ -47,6 +73,9 @@ library PriceCurve {
                 price = newPrice < startPrice ? type(uint256).max : newPrice;
             }
         } else {
+            if (slope == type(int256).min) {
+                return MathUtils.clamp(minPrice, minPrice, maxPrice);
+            }
             uint256 slopeAbs = uint256(-slope);
             uint256 decrement;
             unchecked {
