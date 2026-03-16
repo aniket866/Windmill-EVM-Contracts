@@ -227,9 +227,14 @@ contract WindmillExchange is OrderStorage, PairStorage, IWindmillExchange {
         override
         returns (uint256[] memory)
     {
-        uint256[] memory all = _getOrdersByPair(tokenA, tokenB);
+        uint256[] storage all = _getOrdersByPairStorage(tokenA, tokenB);
+        uint256 total = all.length;
 
-        uint256 remaining = all.length - cursor;
+        if (cursor >= total) {
+            return new uint256[](0);
+        }
+
+        uint256 remaining = total - cursor;
         uint256 size = remaining < limit ? remaining : limit;
 
         uint256[] memory result = new uint256[](size);
