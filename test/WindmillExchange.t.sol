@@ -76,6 +76,7 @@ contract FeeToken {
     function transferFrom(address, address, uint256) external pure returns (bool) {
         return true;
     }
+
     function balanceOf(address) external pure returns (uint256) {
         return 0;
     }
@@ -121,15 +122,7 @@ contract WindmillExchangeTest is Test {
     ) internal returns (uint256) {
         vm.prank(maker);
         return exchange.createOrder(
-            address(tokenA),
-            address(tokenB),
-            amountIn,
-            startPrice,
-            slope,
-            0,
-            0,
-            expiry,
-            true
+            address(tokenA), address(tokenB), amountIn, startPrice, slope, 0, 0, expiry, true
         );
     }
 
@@ -143,15 +136,7 @@ contract WindmillExchangeTest is Test {
     ) internal returns (uint256) {
         vm.prank(maker);
         return exchange.createOrder(
-            address(tokenB),
-            address(tokenA),
-            amountIn,
-            startPrice,
-            slope,
-            0,
-            0,
-            expiry,
-            false
+            address(tokenB), address(tokenA), amountIn, startPrice, slope, 0, 0, expiry, false
         );
     }
 
@@ -219,25 +204,19 @@ contract WindmillExchangeTest is Test {
     function test_createOrder_revert_zeroTokenIn() public {
         vm.prank(alice);
         vm.expectRevert(ZeroAddress.selector);
-        exchange.createOrder(
-            address(0), address(tokenB), 100 ether, RAY, 0, 0, 0, 0, true
-        );
+        exchange.createOrder(address(0), address(tokenB), 100 ether, RAY, 0, 0, 0, 0, true);
     }
 
     function test_createOrder_revert_zeroTokenOut() public {
         vm.prank(alice);
         vm.expectRevert(ZeroAddress.selector);
-        exchange.createOrder(
-            address(tokenA), address(0), 100 ether, RAY, 0, 0, 0, 0, true
-        );
+        exchange.createOrder(address(tokenA), address(0), 100 ether, RAY, 0, 0, 0, 0, true);
     }
 
     function test_createOrder_revert_sameToken() public {
         vm.prank(alice);
         vm.expectRevert(SameToken.selector);
-        exchange.createOrder(
-            address(tokenA), address(tokenA), 100 ether, RAY, 0, 0, 0, 0, true
-        );
+        exchange.createOrder(address(tokenA), address(tokenA), 100 ether, RAY, 0, 0, 0, 0, true);
     }
 
     function test_createOrder_revert_zeroAmount() public {
@@ -249,33 +228,21 @@ contract WindmillExchangeTest is Test {
     function test_createOrder_revert_zeroStartPrice() public {
         vm.prank(alice);
         vm.expectRevert(ZeroStartPrice.selector);
-        exchange.createOrder(
-            address(tokenA), address(tokenB), 100 ether, 0, 0, 0, 0, 0, true
-        );
+        exchange.createOrder(address(tokenA), address(tokenB), 100 ether, 0, 0, 0, 0, 0, true);
     }
 
     function test_createOrder_revert_expiryInPast() public {
         vm.warp(1000);
         vm.prank(alice);
         vm.expectRevert(InvalidExpiry.selector);
-        exchange.createOrder(
-            address(tokenA), address(tokenB), 100 ether, RAY, 0, 0, 0, 999, true
-        );
+        exchange.createOrder(address(tokenA), address(tokenB), 100 ether, RAY, 0, 0, 0, 999, true);
     }
 
     function test_createOrder_revert_slopeOverflow() public {
         vm.prank(alice);
         vm.expectRevert(SlopeOverflow.selector);
         exchange.createOrder(
-            address(tokenA),
-            address(tokenB),
-            100 ether,
-            RAY,
-            type(int128).max,
-            0,
-            0,
-            0,
-            true
+            address(tokenA), address(tokenB), 100 ether, RAY, type(int128).max, 0, 0, 0, true
         );
     }
 
@@ -561,7 +528,7 @@ contract WindmillExchangeTest is Test {
     function test_transferFrom_allowance() public {
         vm.prank(alice);
         tokenA.approve(address(exchange), 100 ether);
-        
+
         vm.prank(alice);
         exchange.createOrder(address(tokenA), address(tokenB), 100 ether, RAY, 0, 0, 0, 0, true);
     }
@@ -569,7 +536,7 @@ contract WindmillExchangeTest is Test {
     function test_transferFrom_insufficientAllowance() public {
         vm.prank(alice);
         tokenA.approve(address(exchange), 50 ether);
-        
+
         vm.prank(alice);
         vm.expectRevert();
         exchange.createOrder(address(tokenA), address(tokenB), 100 ether, RAY, 0, 0, 0, 0, true);
@@ -579,9 +546,7 @@ contract WindmillExchangeTest is Test {
         FeeToken badToken = new FeeToken();
         vm.prank(alice);
         vm.expectRevert(UnsupportedTokenBehavior.selector);
-        exchange.createOrder(
-            address(badToken), address(tokenB), 100 ether, RAY, 0, 0, 0, 0, true
-        );
+        exchange.createOrder(address(badToken), address(tokenB), 100 ether, RAY, 0, 0, 0, 0, true);
     }
 
     function test_currentPrice_maxPriceClamp() public {
@@ -610,10 +575,10 @@ contract WindmillExchangeTest is Test {
         _createBuyOrder(alice, 100 ether, RAY, 0, 0);
         _createBuyOrder(alice, 100 ether, RAY, 0, 0);
         _createBuyOrder(alice, 100 ether, RAY, 0, 0);
-        
+
         uint256[] memory orders = exchange.getOrdersByPair(address(tokenA), address(tokenB), 1, 1);
         assertEq(orders.length, 1);
-        
+
         orders = exchange.getOrdersByPair(address(tokenA), address(tokenB), 5, 10);
         assertEq(orders.length, 0);
     }

@@ -273,8 +273,10 @@ contract WindmillExchange is OrderStorage, PairStorage, IWindmillExchange, Reent
         settlementPrice = PriceCurve.settlementPrice(buy, sell, ts);
         if (settlementPrice == 0) revert ZeroSettlementPrice();
 
-        uint256 buyerAffordableQuantity= MathUtils.mulDiv(buy.remainingIn, settlementPrice, MathUtils.RAY);
-        executedQuantity = buyerAffordableQuantity< sell.remainingIn ? buyerAffordableQuantity: sell.remainingIn;
+        uint256 buyerAffordableQuantity =
+            MathUtils.mulDiv(buy.remainingIn, settlementPrice, MathUtils.RAY);
+        executedQuantity =
+            buyerAffordableQuantity < sell.remainingIn ? buyerAffordableQuantity : sell.remainingIn;
 
         // Compute payment from asset
         notionalAmount = MathUtils.mulDiv(executedQuantity, MathUtils.RAY, settlementPrice);

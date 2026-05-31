@@ -46,7 +46,9 @@ library PriceCurve {
         pure
         returns (uint256)
     {
-        return MathUtils.midpoint(currentPriceAtTime(buy, timestamp), currentPriceAtTime(sell, timestamp));
+        return MathUtils.midpoint(
+            currentPriceAtTime(buy, timestamp), currentPriceAtTime(sell, timestamp)
+        );
     }
 
     function _compute(
@@ -57,16 +59,10 @@ library PriceCurve {
         uint256 maxPrice,
         uint256 timestamp
     ) private pure returns (uint256) {
-        uint256 elapsed = timestamp > createdAt
-            ? timestamp - createdAt
-            : 0;
+        uint256 elapsed = timestamp > createdAt ? timestamp - createdAt : 0;
 
         if (slope == 0 || elapsed == 0) {
-            return MathUtils.clamp(
-                startPrice,
-                minPrice,
-                maxPrice
-            );
+            return MathUtils.clamp(startPrice, minPrice, maxPrice);
         }
 
         if (slope > 0) {
@@ -77,38 +73,22 @@ library PriceCurve {
 
                 if (increment / elapsed != posSlopeAbs) {
                     return MathUtils.clamp(
-                        maxPrice != 0
-                            ? maxPrice
-                            : type(uint256).max,
-                        minPrice,
-                        maxPrice
+                        maxPrice != 0 ? maxPrice : type(uint256).max, minPrice, maxPrice
                     );
                 }
 
                 uint256 newPrice = startPrice + increment;
 
                 if (newPrice < startPrice) {
-                    return MathUtils.clamp(
-                        type(uint256).max,
-                        minPrice,
-                        maxPrice
-                    );
+                    return MathUtils.clamp(type(uint256).max, minPrice, maxPrice);
                 }
 
-                return MathUtils.clamp(
-                    newPrice,
-                    minPrice,
-                    maxPrice
-                );
+                return MathUtils.clamp(newPrice, minPrice, maxPrice);
             }
         }
 
         if (slope == type(int256).min) {
-            return MathUtils.clamp(
-                minPrice,
-                minPrice,
-                maxPrice
-            );
+            return MathUtils.clamp(minPrice, minPrice, maxPrice);
         }
 
         uint256 slopeAbs = uint256(-slope);
@@ -117,22 +97,12 @@ library PriceCurve {
             uint256 decrement = slopeAbs * elapsed;
 
             if (decrement / elapsed != slopeAbs) {
-                return MathUtils.clamp(
-                    minPrice,
-                    minPrice,
-                    maxPrice
-                );
+                return MathUtils.clamp(minPrice, minPrice, maxPrice);
             }
 
-            uint256 price = decrement >= startPrice
-                ? 0
-                : startPrice - decrement;
+            uint256 price = decrement >= startPrice ? 0 : startPrice - decrement;
 
-            return MathUtils.clamp(
-                price,
-                minPrice,
-                maxPrice
-            );
+            return MathUtils.clamp(price, minPrice, maxPrice);
         }
     }
 }
