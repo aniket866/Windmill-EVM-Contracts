@@ -96,14 +96,19 @@ contract WindmillExchange is OrderStorage, PairStorage, IWindmillExchange, Reent
         emit OwnershipTransferred(oldOwner, newOwner);
     }
 
-    function _safeTransferTokenOrETH(address token, address to, uint256 amount) internal {
+    function _safeTransferTokenOrETH(address token, address to, uint256 amount) private {
+        if (amount == 0) return;
         if (token == WETH) {
-            IWETH(WETH).withdraw(amount);
-            (bool success,) = to.call{ value: amount }("");
-            if (!success) revert EthTransferFailed();
-        } else {
-            TokenTransfer.safeTransfer(token, to, amount);
+            if (address(this).balance < amount && IERC20(WETH).balanceOf(address(this)) >= amount) {
+                IWETH(WETH).withdraw(amount);
+            }
+            if (address(this).balance >= amount) {
+                (bool success,) = to.call{ value: amount }("");
+                if (!success) revert EthTransferFailed();
+                return;
+            }
         }
+        TokenTransfer.safeTransfer(token, to, amount);
     }
 
     event OrderCreated(
@@ -272,10 +277,15 @@ contract WindmillExchange is OrderStorage, PairStorage, IWindmillExchange, Reent
         uint256 len = counterOrderIds.length;
         require(len > 0, "Empty counter orders");
 
+        // The primary order is loaded from storage once for the whole batch.  Its mutable
+        // fields (`remainingIn`, `active`) are carried in memory across iterations and
+        // flushed to storage a single time after the loop, instead of once per counter order.
+        Order memory order = _getOrderMem(orderId);
+        bool primaryIsBuy = order.isBuy;
+
         for (uint256 i = 0; i < len; i++) {
             uint256 counterOrderId = counterOrderIds[i];
 
-            Order memory order = _getOrderMem(orderId);
             Order memory counterOrder = _getOrderMem(counterOrderId);
 
             uint256 buyOrderId;
@@ -283,7 +293,7 @@ contract WindmillExchange is OrderStorage, PairStorage, IWindmillExchange, Reent
             Order memory buy;
             Order memory sell;
 
-            if (order.isBuy) {
+            if (primaryIsBuy) {
                 buyOrderId = orderId;
                 sellOrderId = counterOrderId;
                 buy = order;
@@ -308,22 +318,28 @@ contract WindmillExchange is OrderStorage, PairStorage, IWindmillExchange, Reent
             uint256 newBuyRemaining = buy.remainingIn - notionalAmount;
             uint256 newSellRemaining = sell.remainingIn - executedQuantity;
 
-            // Effects
+            // Effects.  `buy` and `sell` are memory references: one of them aliases the
+            // primary `order`, so updating them here keeps the primary's in-memory copy
+            // authoritative for the next iteration without touching storage.
             if (buyFilled) {
                 _deactivateOrder(buyOrderId);
                 _removeOrderFromPair(buy.tokenIn, buy.tokenOut, buyOrderId);
+                buy.active = false;
                 emit OrderFilled(buyOrderId);
             } else {
-                _updateRemainingIn(buyOrderId, newBuyRemaining);
+                if (!primaryIsBuy) _updateRemainingIn(buyOrderId, newBuyRemaining);
+                buy.remainingIn = newBuyRemaining;
                 emit OrderPartiallyFilled(buyOrderId, newBuyRemaining);
             }
 
             if (sellFilled) {
                 _deactivateOrder(sellOrderId);
                 _removeOrderFromPair(sell.tokenIn, sell.tokenOut, sellOrderId);
+                sell.active = false;
                 emit OrderFilled(sellOrderId);
             } else {
-                _updateRemainingIn(sellOrderId, newSellRemaining);
+                if (primaryIsBuy) _updateRemainingIn(sellOrderId, newSellRemaining);
+                sell.remainingIn = newSellRemaining;
                 emit OrderPartiallyFilled(sellOrderId, newSellRemaining);
             }
 
@@ -343,6 +359,13 @@ contract WindmillExchange is OrderStorage, PairStorage, IWindmillExchange, Reent
             emit OrderMatched(
                 buyOrderId, sellOrderId, msg.sender, settlementPrice, executedQuantity
             );
+        }
+
+        // Single storage write for the primary order's remaining amount.  A primary that
+        // filled during the batch was already deactivated in-loop; as in `matchOrders`, a
+        // filled order's `remainingIn` is never read again and is left untouched.
+        if (order.active) {
+            _updateRemainingIn(orderId, order.remainingIn);
         }
     }
 

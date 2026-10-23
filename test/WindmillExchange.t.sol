@@ -115,6 +115,27 @@ contract MockWETH is MockERC20 {
     }
 }
 
+contract RejectETHReceiver {
+    function approveToken(address token, address spender) external {
+        MockERC20(token).approve(spender, type(uint256).max);
+    }
+
+    function createOrder(
+        WindmillExchange exchange,
+        address tokenIn,
+        address tokenOut,
+        uint256 amountIn,
+        uint256 startPrice,
+        bool isBuy
+    ) external returns (uint256) {
+        return exchange.createOrder(tokenIn, tokenOut, amountIn, startPrice, 0, 0, 0, 0, isBuy);
+    }
+
+    receive() external payable {
+        revert("ETH not accepted");
+    }
+}
+
 contract WindmillExchangeTest is Test {
     uint256 internal constant RAY = 1e27;
 
@@ -680,6 +701,112 @@ contract WindmillExchangeTest is Test {
         assertEq(exchange.getOrder(buyId3).remainingIn, 50 ether);
     }
 
+    /// @notice The primary order's `remainingIn` is tracked in memory across the batch and
+    /// flushed to storage once; a partially-filled sell primary must land on the exact total.
+    function test_matchOrdersBatch_sellPrimary_partialFill_flushedOnce() public {
+        uint256 price = RAY;
+        uint256 sellId = _createSellOrder(bob, 400 ether, price, 0, 0);
+
+        uint256[] memory counterOrderIds = new uint256[](3);
+        counterOrderIds[0] = _createBuyOrder(alice, 100 ether, price, 0, 0);
+        counterOrderIds[1] = _createBuyOrder(alice, 100 ether, price, 0, 0);
+        counterOrderIds[2] = _createBuyOrder(alice, 100 ether, price, 0, 0);
+
+        exchange.matchOrdersBatch(sellId, counterOrderIds, block.timestamp + 1);
+
+        assertTrue(exchange.getOrder(sellId).active, "primary should survive the batch");
+        assertEq(
+            exchange.getOrder(sellId).remainingIn,
+            100 ether,
+            "primary remaining must reflect all three fills"
+        );
+        for (uint256 i; i < counterOrderIds.length; i++) {
+            assertFalse(exchange.getOrder(counterOrderIds[i]).active);
+        }
+    }
+
+    /// @notice Counter orders keep their per-iteration storage write: a sell counter that
+    /// only partially fills must have its remainder persisted immediately.
+    function test_matchOrdersBatch_buyPrimary_partiallyFillsLastSellCounter() public {
+        uint256 price = RAY;
+        uint256 buyId = _createBuyOrder(alice, 250 ether, price, 0, 0);
+
+        uint256[] memory counterOrderIds = new uint256[](3);
+        counterOrderIds[0] = _createSellOrder(bob, 100 ether, price, 0, 0);
+        counterOrderIds[1] = _createSellOrder(bob, 100 ether, price, 0, 0);
+        counterOrderIds[2] = _createSellOrder(bob, 100 ether, price, 0, 0);
+
+        exchange.matchOrdersBatch(buyId, counterOrderIds, block.timestamp + 1);
+
+        assertFalse(exchange.getOrder(buyId).active);
+        assertFalse(exchange.getOrder(counterOrderIds[0]).active);
+        assertFalse(exchange.getOrder(counterOrderIds[1]).active);
+        assertTrue(exchange.getOrder(counterOrderIds[2]).active);
+        assertEq(exchange.getOrder(counterOrderIds[2]).remainingIn, 50 ether);
+    }
+
+    /// @notice Same deferred-flush path with the primary on the buy side.
+    function test_matchOrdersBatch_buyPrimary_partialFill_flushedOnce() public {
+        uint256 price = RAY;
+        uint256 buyId = _createBuyOrder(alice, 400 ether, price, 0, 0);
+
+        uint256[] memory counterOrderIds = new uint256[](3);
+        counterOrderIds[0] = _createSellOrder(bob, 100 ether, price, 0, 0);
+        counterOrderIds[1] = _createSellOrder(bob, 100 ether, price, 0, 0);
+        counterOrderIds[2] = _createSellOrder(bob, 100 ether, price, 0, 0);
+
+        exchange.matchOrdersBatch(buyId, counterOrderIds, block.timestamp + 1);
+
+        assertTrue(exchange.getOrder(buyId).active, "primary should survive the batch");
+        assertEq(
+            exchange.getOrder(buyId).remainingIn,
+            100 ether,
+            "primary remaining must reflect all three fills"
+        );
+        for (uint256 i; i < counterOrderIds.length; i++) {
+            assertFalse(exchange.getOrder(counterOrderIds[i]).active);
+        }
+    }
+
+    /// @notice Deferring the storage write must not change the event stream: the primary
+    /// still reports its decreasing remainder once per counter order.
+    function test_matchOrdersBatch_emitsPrimaryPartialFillPerIteration() public {
+        uint256 price = RAY;
+        uint256 sellId = _createSellOrder(bob, 400 ether, price, 0, 0);
+
+        uint256[] memory counterOrderIds = new uint256[](3);
+        counterOrderIds[0] = _createBuyOrder(alice, 100 ether, price, 0, 0);
+        counterOrderIds[1] = _createBuyOrder(alice, 100 ether, price, 0, 0);
+        counterOrderIds[2] = _createBuyOrder(alice, 100 ether, price, 0, 0);
+
+        vm.expectEmit(true, false, false, true, address(exchange));
+        emit WindmillExchange.OrderPartiallyFilled(sellId, 300 ether);
+        vm.expectEmit(true, false, false, true, address(exchange));
+        emit WindmillExchange.OrderPartiallyFilled(sellId, 200 ether);
+        vm.expectEmit(true, false, false, true, address(exchange));
+        emit WindmillExchange.OrderPartiallyFilled(sellId, 100 ether);
+
+        exchange.matchOrdersBatch(sellId, counterOrderIds, block.timestamp + 1);
+    }
+
+    /// @notice A primary that fills before the batch is exhausted still rejects the whole
+    /// batch, because the in-memory copy is marked inactive exactly like the stored one.
+    function test_matchOrdersBatch_revert_primaryFilledBeforeBatchEnds() public {
+        uint256 price = RAY;
+        uint256 buyId = _createBuyOrder(alice, 200 ether, price, 0, 0);
+
+        uint256[] memory counterOrderIds = new uint256[](3);
+        counterOrderIds[0] = _createSellOrder(bob, 100 ether, price, 0, 0);
+        counterOrderIds[1] = _createSellOrder(bob, 100 ether, price, 0, 0);
+        counterOrderIds[2] = _createSellOrder(bob, 100 ether, price, 0, 0);
+
+        vm.expectRevert(OrderInactive.selector);
+        exchange.matchOrdersBatch(buyId, counterOrderIds, block.timestamp + 1);
+
+        assertTrue(exchange.getOrder(buyId).active, "the whole batch must roll back");
+        assertEq(exchange.getOrder(buyId).remainingIn, 200 ether);
+    }
+
     function test_nativeETH_wrapOnDeposit() public {
         uint256 startBal = alice.balance;
         vm.prank(alice);
@@ -744,6 +871,104 @@ contract WindmillExchangeTest is Test {
         exchange.createOrder{ value: 5 ether }(
             address(weth), address(tokenB), 10 ether, RAY, 0, 0, 0, 0, true
         );
+    }
+
+    function test_nativeETH_revertOnFailedEthTransfer() public {
+        RejectETHReceiver rejecter = new RejectETHReceiver();
+        tokenB.mint(address(rejecter), 100 ether);
+        rejecter.approveToken(address(tokenB), address(exchange));
+
+        vm.prank(alice);
+        uint256 buyId = exchange.createOrder{ value: 100 ether }(
+            address(weth), address(tokenB), 100 ether, RAY, 0, 0, 0, 0, true
+        );
+
+        uint256 sellId =
+            rejecter.createOrder(exchange, address(tokenB), address(weth), 100 ether, RAY, false);
+
+        vm.expectRevert(EthTransferFailed.selector);
+        exchange.matchOrders(buyId, sellId, block.timestamp + 1);
+
+        assertTrue(exchange.getOrder(buyId).active, "buy order should still be active");
+        assertTrue(exchange.getOrder(sellId).active, "sell order should still be active");
+        assertEq(weth.balanceOf(address(exchange)), 100 ether, "WETH escrow should be intact");
+        assertEq(tokenB.balanceOf(address(exchange)), 100 ether, "tokenB escrow should be intact");
+        assertEq(address(rejecter).balance, 0, "rejecter should hold no ETH");
+    }
+
+    /// @notice Verifies that prefunded ETH bypasses WETH withdrawal for the seller payout.
+    function test_nativeETH_skipUnwrapWhenPrefunded() public {
+        vm.prank(alice);
+        uint256 buyId = exchange.createOrder{ value: 100 ether }(
+            address(weth), address(tokenB), 100 ether, RAY, 0, 0, 0, 0, true
+        );
+
+        vm.prank(bob);
+        uint256 sellId = exchange.createOrder(
+            address(tokenB), address(weth), 100 ether, RAY, 0, 0, 0, 0, false
+        );
+
+        uint256 sellerPayout = 99.9 ether;
+        uint256 keeperFee = 0.1 ether;
+        vm.deal(address(exchange), sellerPayout);
+
+        uint256 aliceBBefore = tokenB.balanceOf(alice);
+        uint256 bobETHBefore = bob.balance;
+        uint256 keeperETHBefore = address(this).balance;
+
+        vm.expectCall(address(weth), abi.encodeCall(MockWETH.withdraw, (sellerPayout)), 0);
+        exchange.matchOrders(buyId, sellId, block.timestamp + 1);
+
+        assertEq(bob.balance - bobETHBefore, sellerPayout, "seller should be paid in native ETH");
+        assertEq(
+            address(this).balance - keeperETHBefore,
+            keeperFee,
+            "keeper should be paid in native ETH"
+        );
+        assertEq(tokenB.balanceOf(alice) - aliceBBefore, 100 ether, "buyer should receive tokenB");
+
+        assertFalse(exchange.getOrder(buyId).active, "buy order should be filled");
+        assertFalse(exchange.getOrder(sellId).active, "sell order should be filled");
+
+        assertEq(
+            weth.balanceOf(address(exchange)),
+            100 ether - keeperFee,
+            "WETH escrow should only be unwrapped for the keeper fee"
+        );
+        assertEq(address(exchange).balance, 0, "pre-funded ETH should be fully spent");
+        assertEq(tokenB.balanceOf(address(exchange)), 0, "tokenB escrow should be fully released");
+    }
+
+    /// @notice Verifies that a rejected ETH payout reverts and rolls back when the exchange
+    /// pays from prefunded native ETH and skips the WETH withdrawal.
+    function test_nativeETH_revertOnFailedEthTransferWhenPrefunded() public {
+        RejectETHReceiver rejecter = new RejectETHReceiver();
+        tokenB.mint(address(rejecter), 100 ether);
+        rejecter.approveToken(address(tokenB), address(exchange));
+
+        vm.prank(alice);
+        uint256 buyId =
+            exchange.createOrder(address(weth), address(tokenB), 100 ether, RAY, 0, 0, 0, 0, true);
+
+        uint256 sellId =
+            rejecter.createOrder(exchange, address(tokenB), address(weth), 100 ether, RAY, false);
+
+        uint256 sellerPayout = 99.9 ether;
+        vm.deal(address(exchange), sellerPayout);
+
+        vm.expectCall(address(weth), abi.encodeWithSelector(MockWETH.withdraw.selector), 0);
+        vm.expectRevert(EthTransferFailed.selector);
+        exchange.matchOrders(buyId, sellId, block.timestamp + 1);
+
+        assertTrue(exchange.getOrder(buyId).active, "buy order should still be active");
+        assertTrue(exchange.getOrder(sellId).active, "sell order should still be active");
+        assertEq(exchange.getOrder(buyId).remainingIn, 100 ether, "buy order should be unfilled");
+        assertEq(exchange.getOrder(sellId).remainingIn, 100 ether, "sell order should be unfilled");
+
+        assertEq(weth.balanceOf(address(exchange)), 100 ether, "WETH escrow should be intact");
+        assertEq(tokenB.balanceOf(address(exchange)), 100 ether, "tokenB escrow should be intact");
+        assertEq(address(exchange).balance, sellerPayout, "pre-funded ETH should be untouched");
+        assertEq(address(rejecter).balance, 0, "rejecter should hold no ETH");
     }
 
     function test_protocolFees_setFeeAndRespectCap() public {
