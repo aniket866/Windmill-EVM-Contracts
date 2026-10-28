@@ -680,6 +680,45 @@ contract WindmillExchangeTest is Test {
         assertEq(exchange.getOrder(buyId3).remainingIn, 50 ether);
     }
 
+    function test_matchOrdersBatch_earlyFillBreaksLoop() public {
+        uint256 price = RAY;
+        // Alice buys 200 ether total
+        uint256 buyId = _createBuyOrder(alice, 200 ether, price, 0, 0);
+
+        // Bob provides 3 sell orders of 100 ether each (total 300 ether)
+        uint256 sellId1 = _createSellOrder(bob, 100 ether, price, 0, 0);
+        uint256 sellId2 = _createSellOrder(bob, 100 ether, price, 0, 0);
+        uint256 sellId3 = _createSellOrder(bob, 100 ether, price, 0, 0);
+
+        uint256[] memory counterOrderIds = new uint256[](3);
+        counterOrderIds[0] = sellId1;
+        counterOrderIds[1] = sellId2;
+        counterOrderIds[2] = sellId3;
+
+        // Without the early break, iteration 3 would attempt to validate the inactive buyId and revert.
+        // With the break, buyId is fulfilled in iterations 1 & 2, and sellId3 remains active.
+        exchange.matchOrdersBatch(buyId, counterOrderIds, block.timestamp + 1);
+
+        assertFalse(exchange.getOrder(buyId).active);
+        assertFalse(exchange.getOrder(sellId1).active);
+        assertFalse(exchange.getOrder(sellId2).active);
+        assertTrue(exchange.getOrder(sellId3).active);
+        assertEq(exchange.getOrder(sellId3).remainingIn, 100 ether);
+    }
+
+    function test_matchOrdersBatch_revert_batchTooLarge() public {
+        uint256 price = RAY;
+        uint256 buyId = _createBuyOrder(alice, 100 ether, price, 0, 0);
+
+        uint256[] memory largeBatch = new uint256[](51);
+        for (uint256 i = 0; i < 51; i++) {
+            largeBatch[i] = 1;
+        }
+
+        vm.expectRevert("Batch too large");
+        exchange.matchOrdersBatch(buyId, largeBatch, block.timestamp + 1);
+    }
+
     function test_nativeETH_wrapOnDeposit() public {
         uint256 startBal = alice.balance;
         vm.prank(alice);

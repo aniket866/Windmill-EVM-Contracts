@@ -40,6 +40,8 @@ interface IWETH {
 }
 
 contract WindmillExchange is OrderStorage, PairStorage, IWindmillExchange, ReentrancyGuard {
+    uint256 public constant MAX_BATCH_SIZE = 50;
+
     address public owner;
     bool public paused;
     address public immutable WETH;
@@ -226,17 +228,17 @@ contract WindmillExchange is OrderStorage, PairStorage, IWindmillExchange, Reent
             bool sellFilled
         ) = _computeSettlement(buy, sell, block.timestamp);
 
-        uint256 newBuyRemaining = buy.remainingIn - notionalAmount;
-        uint256 newSellRemaining = sell.remainingIn - executedQuantity;
-
         // Effects
         if (buyFilled) {
             _deactivateOrder(buyOrderId);
             _removeOrderFromPair(buy.tokenIn, buy.tokenOut, buyOrderId);
             emit OrderFilled(buyOrderId);
         } else {
-            _updateRemainingIn(buyOrderId, newBuyRemaining);
-            emit OrderPartiallyFilled(buyOrderId, newBuyRemaining);
+            unchecked {
+                buy.remainingIn -= notionalAmount;
+            }
+            _updateRemainingIn(buyOrderId, buy.remainingIn);
+            emit OrderPartiallyFilled(buyOrderId, buy.remainingIn);
         }
 
         if (sellFilled) {
@@ -244,13 +246,17 @@ contract WindmillExchange is OrderStorage, PairStorage, IWindmillExchange, Reent
             _removeOrderFromPair(sell.tokenIn, sell.tokenOut, sellOrderId);
             emit OrderFilled(sellOrderId);
         } else {
-            _updateRemainingIn(sellOrderId, newSellRemaining);
-            emit OrderPartiallyFilled(sellOrderId, newSellRemaining);
+            unchecked {
+                sell.remainingIn -= executedQuantity;
+            }
+            _updateRemainingIn(sellOrderId, sell.remainingIn);
+            emit OrderPartiallyFilled(sellOrderId, sell.remainingIn);
         }
 
         // Interactions
         uint256 keeperFee = notionalAmount / 1000; // 0.1%
         uint256 protocolFee = (notionalAmount * protocolFeeBps) / 10000;
+        if (keeperFee + protocolFee > notionalAmount) revert InvalidProtocolFee();
 
         _safeTransferTokenOrETH(sell.tokenIn, buy.maker, executedQuantity);
         _safeTransferTokenOrETH(buy.tokenIn, sell.maker, notionalAmount - keeperFee - protocolFee);
@@ -271,6 +277,7 @@ contract WindmillExchange is OrderStorage, PairStorage, IWindmillExchange, Reent
         require(block.timestamp <= deadline, "Keeper deadline expired");
         uint256 len = counterOrderIds.length;
         require(len > 0, "Empty counter orders");
+        require(len <= MAX_BATCH_SIZE, "Batch too large");
 
         for (uint256 i = 0; i < len; i++) {
             uint256 counterOrderId = counterOrderIds[i];
@@ -305,17 +312,17 @@ contract WindmillExchange is OrderStorage, PairStorage, IWindmillExchange, Reent
                 bool sellFilled
             ) = _computeSettlement(buy, sell, block.timestamp);
 
-            uint256 newBuyRemaining = buy.remainingIn - notionalAmount;
-            uint256 newSellRemaining = sell.remainingIn - executedQuantity;
-
             // Effects
             if (buyFilled) {
                 _deactivateOrder(buyOrderId);
                 _removeOrderFromPair(buy.tokenIn, buy.tokenOut, buyOrderId);
                 emit OrderFilled(buyOrderId);
             } else {
-                _updateRemainingIn(buyOrderId, newBuyRemaining);
-                emit OrderPartiallyFilled(buyOrderId, newBuyRemaining);
+                unchecked {
+                    buy.remainingIn -= notionalAmount;
+                }
+                _updateRemainingIn(buyOrderId, buy.remainingIn);
+                emit OrderPartiallyFilled(buyOrderId, buy.remainingIn);
             }
 
             if (sellFilled) {
@@ -323,13 +330,17 @@ contract WindmillExchange is OrderStorage, PairStorage, IWindmillExchange, Reent
                 _removeOrderFromPair(sell.tokenIn, sell.tokenOut, sellOrderId);
                 emit OrderFilled(sellOrderId);
             } else {
-                _updateRemainingIn(sellOrderId, newSellRemaining);
-                emit OrderPartiallyFilled(sellOrderId, newSellRemaining);
+                unchecked {
+                    sell.remainingIn -= executedQuantity;
+                }
+                _updateRemainingIn(sellOrderId, sell.remainingIn);
+                emit OrderPartiallyFilled(sellOrderId, sell.remainingIn);
             }
 
             // Interactions
             uint256 keeperFee = notionalAmount / 1000; // 0.1%
             uint256 protocolFee = (notionalAmount * protocolFeeBps) / 10000;
+            if (keeperFee + protocolFee > notionalAmount) revert InvalidProtocolFee();
 
             _safeTransferTokenOrETH(sell.tokenIn, buy.maker, executedQuantity);
             _safeTransferTokenOrETH(
@@ -343,6 +354,10 @@ contract WindmillExchange is OrderStorage, PairStorage, IWindmillExchange, Reent
             emit OrderMatched(
                 buyOrderId, sellOrderId, msg.sender, settlementPrice, executedQuantity
             );
+
+            if (order.isBuy ? buyFilled : sellFilled) {
+                break;
+            }
         }
     }
 
